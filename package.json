@@ -1,0 +1,16 @@
+{
+  "name": "tumble",
+  "version": "0.1.0",
+  "description": "Pure, deterministic, headless-testable 3D rigid-body physics engine (XPBD contacts, box inertia). Tumbling/stacking objects — mahjong tiles & dice.",
+  "type": "module",
+  "main": "index.js",
+  "exports": "./index.js",
+  "files": ["index.js"],
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "keywords": ["physics", "rigid-body", "xpbd", "collision", "3d", "deterministic", "inertia", "headless", "mahjong"],
+  "license": "MIT",
+  "author": "opaopa6969",
+  "repository": { "type": "git", "url": "https://github.com/opaopa6969/tumble.git" }
+}
