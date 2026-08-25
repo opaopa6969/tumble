@@ -1,0 +1,106 @@
+{
+  "repo": "tumble",
+  "surveyed_at": "2026-08-22T07:57:00Z",
+  "kind": "library",
+  "summary": "Pure ESM・依存ゼロ・決定的な 3D 剛体物理エンジン（XPBD 接触、異方性ボックス慣性）。落下・転倒・積みを扱い、麻雀牌やサイコロの挙動を再現する。M1 完了（box↔ground-plane 接触のみ）。",
+  "decision": "skill-only",
+  "decision_reason": "依存ゼロ・起動1秒以内のライブラリで常駐プロセスの価値が薄い。現状 M1 のみで box↔box が未実装（M2-M4 は planned）のため、tool 化しても機能が限定的。node -e で同等の呼び出しが可能。ただし決定性の保証・ヘッドレス運用・mahjong 統合の手順は skill として配る価値があり、M2 以降の進捗で再評価すべき。",
+  "existing": {
+    "http_api": false,
+    "cli": false,
+    "mcp": false,
+    "healthz": false,
+    "volta_manifest": false,
+    "hosted_url": null
+  },
+  "proposed_namespace": null,
+  "capabilities": [
+    {
+      "verb": "物理シミュレーションを1フレーム進める",
+      "kind": "skill",
+      "name": "simulate-step",
+      "locality": "repo",
+      "note": "World.step(dt, substeps) の呼び出し方・body 状態の読み方。tool 化せず node -e で十分"
+    },
+    {
+      "verb": "傾いたボックスを落下させて静止姿勢を得る",
+      "kind": "skill",
+      "name": "drop-and-settle",
+      "locality": "repo",
+      "note": "test.mjs と同じ手順。決定性の保証（Math.random 禁止・固定 substep）の解説を含む"
+    },
+    {
+      "verb": "能力の仕様",
+      "kind": "resource",
+      "name": "spec",
+      "uri": "tumble://spec",
+      "note": "M1 の能力範囲: Body(World/Body API, box inertia), box↔ground-plane XPBD contacts, damping。M2-M4 の計画"
+    },
+    {
+      "verb": "使い方",
+      "kind": "resource",
+      "name": "guide",
+      "uri": "tumble://guide",
+      "note": "import して World/Body を作り step を呼ぶ基本手順・CDN 利用法・test.mjs の実行法"
+    },
+    {
+      "verb": "tumble で決定的な物理を回す手順",
+      "kind": "skill",
+      "name": "deterministic-physics",
+      "locality": "global",
+      "note": "固定 substep・Math.random 禁止・シード互換の麻雀配牌に使う方法。xpbd-body と共通の流儀"
+    },
+    {
+      "verb": "麻雀ゲームへの物理統合",
+      "kind": "skill",
+      "name": "mahjong-physics-wiring",
+      "locality": "repo",
+      "note": "M4 計画: 物理シャッフル壁・サイコロロール・捨て投げ。netmahg との協調。未実装"
+    }
+  ],
+  "composition_examples": [
+    "tumble でサイコロを転がして body.q から上面を判定 → netmahg の配牌ロジックに供給（決定性を保った dice roll）",
+    "tumble で麻雀牌の壁を物理シャッフル（M2-M4 必要）→ 結果の配列を netmahg の deal seed として注入",
+    "tumble で牌の捨て投げをシミュレート → 着地姿勢を renderer (three.js 等) に渡して描画"
+  ],
+  "dependencies": [
+    {
+      "repo": "xpbd-body",
+      "direction": "depends_on",
+      "capability": "sibling engine (articulated bodies / joints)",
+      "exists_now": false,
+      "note": "tumble は rigid contacts、xpbd-body は articulated bodies。コード依存は無いが共通の流儀（pure ESM, zero deps, deterministic）を共有。xpbd-body は volta カタログに未登録"
+    },
+    {
+      "repo": "motion-engine",
+      "direction": "depends_on",
+      "capability": "sibling engine (共通ハウススタイルの参照元)",
+      "exists_now": false,
+      "note": "コード依存は無い。流儀（pure ESM, zero deps, deterministic, headless-testable）の参照元。volta カタログに未登録"
+    },
+    {
+      "repo": "netmahg",
+      "direction": "provides_to",
+      "capability": "物理シミュレーション結果（dice roll, wall shuffle, discard toss）",
+      "exists_now": true,
+      "note": "M4 で tumble を netmahg に組み込む計画。現時点では tumble 側に統合入口は無い。netmahg は volta に登録済み（id=netmahg, port=7074, systemd）"
+    }
+  ],
+  "library_serve": {
+    "needed": false,
+    "new_work": [],
+    "runtime": "node",
+    "estimated_effort": "S"
+  },
+  "risks": [
+    "M1 のみで box↔box 衝突が未実装。実用的な積み上げ・壁構築には M2 が必要",
+    "決定性は Math.random 禁止に依存する。呼び出し側が乱数を混ぜると再現性が失われる",
+    "物理パラメータ（substeps, damping, timestep）の調整が必要。不適切な値では安定しない",
+    "ライセンス MIT だが、CDN 経由で配布されるためバージョン固定の注意"
+  ],
+  "open_questions": [
+    "M2（box↔box SAT+manifold）の実装タイミング。完了後に library-serve を再評価すべきか",
+    "netmahg 側が tumble の物理結果をどのような形式で受け取るべきか（JSON RPC, 共有メモリ, ライブラリ import）",
+    "xpbd-body / motion-engine も MCP 化の調査対象か。3 つの物理エンジンを統合する入口は必要か"
+  ]
+}

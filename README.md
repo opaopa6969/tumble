@@ -28,9 +28,9 @@ tile.q;   // [x, y, z, w] orientation quaternion
 
 ## API
 
-- `new World({ gravity?, floor?, linDamp?, angDamp? })` — `gravity` default `[0,-9.81,0]`, `floor` is the ground-plane height `y = floor` (normal `+y`), default `0`.
-- `world.add(body)` → the body. `world.step(dt, substeps = 8)` — advance one fixed frame.
-- `new Body({ pos, quat?, half?, mass?, fixed? })` — `half` = box half-extents `[hx,hy,hz]` (default `0.5³`); `fixed: true` makes it immovable (`invM = 0`). Read `body.p` (position), `body.q` (quat), `body.v` (linear vel), `body.w` (angular vel); `body.corners()` returns the 8 world-space corners.
+- `new World({ gravity?, floor?, linDamp?, angDamp? })` — `gravity` default `[0,-9.81,0]`, `floor` is the ground-plane height `y = floor` (normal `+y`), default `0`; `linDamp` default `0.999`, `angDamp` default `0.995`.
+- `world.add(body)` → the body. `world.step(dt, substeps = 8)` — advance one fixed frame (`substeps` default `8`).
+- `new Body({ pos, quat?, half?, mass?, fixed? })` — `pos` **required** `[x,y,z]`; `quat` default `[0,0,0,1]`; `half` = box half-extents `[hx,hy,hz]` (default `0.5³`); `mass` default `1`; `fixed: true` makes it immovable (`invM = 0`). Read `body.p` (position), `body.q` (quat), `body.v` (linear vel), `body.w` (angular vel); `body.corners()` returns the 8 world-space corners.
 
 ## Use via CDN (no build step)
 
@@ -51,6 +51,18 @@ Headless: drops a tilted box, steps ~3s, and asserts it stays finite, comes to r
 ## Status
 
 **M1 done** — `Body` (box inertia), the integrator, and box↔ground-plane XPBD contacts: drop a tilted box, it tumbles and settles on a face. See [`DESIGN.md`](./DESIGN.md) for the M1–M4 plan (box↔box SAT+manifold stacking, broadphase grid + sleeping, mahjong host wiring).
+
+## MCP
+
+tumble participates in the [volta-mcp](https://github.com/opaopa6969/volta-mcp) facade as **skill-only** (no MCP server). The namespace is `tumble`. Three skills are distributed via `docs/skills/tumble__*/SKILL.md` in the volta-mcp repo:
+
+| skill | purpose | locality |
+|---|---|---|
+| `tumble__drop-and-settle` | Drop a tilted box, get the settle pose (M1) | repo |
+| `tumble__deterministic-physics` | Deterministic physics policy (fixed substep, no Math.random) | global |
+| `tumble__mahjong-physics-wiring` | M4 plan: physics shuffle wall, dice roll, discard toss for netmahg | repo |
+
+M2 (box↔box stacking) completion will trigger re-evaluation of `library-serve` (a resident MCP server with `tumble://spec` / `tumble://guide` resources). See [`docs/mcp/DESIGN.md`](./docs/mcp/DESIGN.md) and [`docs/mcp/STATUS.md`](./docs/mcp/STATUS.md) for details. Coordination with netmahg is tracked in [issue-hub #339](https://github.com/opaopa6969/issue-hub/issues/339).
 
 ## License
 
