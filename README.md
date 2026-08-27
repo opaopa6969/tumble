@@ -1,6 +1,6 @@
 # tumble
 
-> Pure, deterministic, headless-testable 3D **rigid-body physics** — boxes, a ground plane and spheres resolved with **XPBD contacts**, with a real **box inertia tensor** so flat bodies tumble and settle on a face the way a mahjong tile or a die does.
+> Pure, deterministic, headless-testable 3D **rigid-body physics** — boxes and a ground plane resolved with **XPBD contacts**, with a real **box inertia tensor** so flat bodies tumble and settle on a face the way a mahjong tile or a die does.
 
 `tumble` is a tiny, dependency-free physics engine for *things that fall, tumble, stack and come to rest*. Unlike a typical isotropic toy, every body carries an **anisotropic box inertia** applied in world space via a quaternion trick (no 3×3 matrices), so a thin tile rotates to lie down on a face instead of spinning like a ball. It's a sibling of [`xpbd-body`](https://github.com/opaopa6969/xpbd-body) (which does *articulated* bodies — joints + motors); `tumble` does *rigid contacts*: non-penetration, friction, stacking. It is **pure** (no renderer / DOM / dependencies) and **deterministic** (fixed substeps, no `Math.random`), so it runs **headless** and is unit-tested in Node — and it drops into a seeded mahjong deal (physics-shuffled wall, dice roll, discard toss) without breaking reproducibility.
 
