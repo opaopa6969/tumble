@@ -70,4 +70,58 @@ const TILT = (() => {
 }
 
 console.log(`\ntumble M1: ${pass} passed${fail ? `, ${fail} FAILED` : ''}`);
+
+function stack(count, frames = 600) {
+  const world = new World(); const bodies = [];
+  for (let i = 0; i < count; i++) {
+    bodies.push(world.add(new Body({ pos: [0, 0.5 + i * 1.02, 0], half: [0.5, 0.5, 0.5] })));
+  }
+  for (let i = 0; i < frames; i++) world.step(1 / 60, 8);
+  return bodies;
+}
+
+// M2: separated OBBs must not be corrected by SAT.
+{
+  const world = new World({ gravity: [0, 0, 0], floor: -10, linDamp: 1, angDamp: 1 });
+  const a = world.add(new Body({ pos: [0, 0, 0], quat: TILT, half: [0.5, 0.2, 0.3] }));
+  const b = world.add(new Body({ pos: [3, 0, 0], quat: TILT, half: [0.5, 0.2, 0.3] }));
+  const before = JSON.stringify([a.p, b.p]);
+  world.step(1 / 60, 8);
+  ok(JSON.stringify([a.p, b.p]) === before, 'SAT leaves separated boxes untouched');
+}
+
+// M2: two boxes and a five-box tower settle without overlap or collapse.
+{
+  const two = stack(2, 360);
+  ok(Math.abs(two[0].p[1] - 0.5) < 0.02 && Math.abs(two[1].p[1] - 1.5) < 0.02,
+    'two boxes stack at the expected heights');
+  ok(two.every((b) => Math.hypot(...b.v) < 0.03 && Math.hypot(...b.w) < 0.03),
+    'two-box stack comes to rest');
+
+  const tower = stack(5);
+  const aligned = tower.every((b, i) =>
+    Math.abs(b.p[0]) < 0.03 && Math.abs(b.p[2]) < 0.03 && Math.abs(b.p[1] - (0.5 + i)) < 0.03);
+  ok(aligned, 'five-box stack remains aligned and non-penetrating');
+  ok(tower.every((b) => Math.hypot(...b.v) < 0.03 && Math.hypot(...b.w) < 0.03),
+    'five-box stack comes to rest');
+}
+
+// M2: Coulomb friction removes tangential motion on a supporting box.
+{
+  const world = new World();
+  world.add(new Body({ pos: [0, 0.5, 0], half: [2, 0.5, 2], fixed: true, friction: 0.8 }));
+  const sliding = world.add(new Body({ pos: [0, 1.5, 0], friction: 0.8 }));
+  sliding.v = [1, 0, 0];
+  for (let i = 0; i < 120; i++) world.step(1 / 60, 8);
+  ok(Math.abs(sliding.v[0]) < 0.02 && sliding.p[0] < 0.3, 'Coulomb friction stops tangential sliding');
+}
+
+// M2 remains bit-identical for the complete multi-body trajectory.
+{
+  const a = stack(5).map((b) => [b.p, b.q, b.v, b.w]);
+  const b = stack(5).map((body) => [body.p, body.q, body.v, body.w]);
+  ok(JSON.stringify(a) === JSON.stringify(b), 'five-box stack is bit-identical across two runs');
+}
+
+console.log(`tumble M2: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

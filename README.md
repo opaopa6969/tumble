@@ -28,9 +28,9 @@ tile.q;   // [x, y, z, w] orientation quaternion
 
 ## API
 
-- `new World({ gravity?, floor?, linDamp?, angDamp? })` — `gravity` default `[0,-9.81,0]`, `floor` is the ground-plane height `y = floor` (normal `+y`), default `0`; `linDamp` default `0.999`, `angDamp` default `0.995`.
+- `new World({ gravity?, floor?, linDamp?, angDamp?, contactIterations? })` — `gravity` default `[0,-9.81,0]`, `floor` is the ground-plane height `y = floor` (normal `+y`), default `0`; `linDamp` default `0.999`, `angDamp` default `0.995`; `contactIterations` default `8` propagates manifold corrections through stacks.
 - `world.add(body)` → the body. `world.step(dt, substeps = 8)` — advance one fixed frame (`substeps` default `8`).
-- `new Body({ pos, quat?, half?, mass?, fixed? })` — `pos` **required** `[x,y,z]`; `quat` default `[0,0,0,1]`; `half` = box half-extents `[hx,hy,hz]` (default `0.5³`); `mass` default `1`; `fixed: true` makes it immovable (`invM = 0`). Read `body.p` (position), `body.q` (quat), `body.v` (linear vel), `body.w` (angular vel); `body.corners()` returns the 8 world-space corners.
+- `new Body({ pos, quat?, half?, mass?, fixed?, friction? })` — `pos` **required** `[x,y,z]`; `quat` default `[0,0,0,1]`; `half` = box half-extents `[hx,hy,hz]` (default `0.5³`); `mass` default `1`; `friction` is the Coulomb coefficient (default `0.5`); `fixed: true` makes it immovable (`invM = 0`). Read `body.p` (position), `body.q` (quat), `body.v` (linear vel), `body.w` (angular vel); `body.corners()` returns the 8 world-space corners.
 
 ## Use via CDN (no build step)
 
@@ -46,11 +46,11 @@ tile.q;   // [x, y, z, w] orientation quaternion
 node test.mjs     # or: npm test
 ```
 
-Headless: drops a tilted box, steps ~3s, and asserts it stays finite, comes to rest **on** the floor (lowest corner ≈ floor, `|v|` & `|w|` small, settled flat on a face), and is **bit-identical across two runs**.
+Headless: verifies a tilted box settling on the floor, separated OBBs, two-box and five-box stacks, Coulomb friction, and **bit-identical multi-body results across two runs**.
 
 ## Status
 
-**M1 done** — `Body` (box inertia), the integrator, and box↔ground-plane XPBD contacts: drop a tilted box, it tumbles and settles on a face. See [`DESIGN.md`](./DESIGN.md) for the M1–M4 plan (box↔box SAT+manifold stacking, broadphase grid + sleeping, mahjong host wiring).
+**M2 done** — M1's box inertia and box↔ground-plane contacts plus box↔box OBB SAT over 15 axes, clipped contact manifolds, XPBD stacking, and Coulomb friction. See [`DESIGN.md`](./DESIGN.md) for the remaining M3–M4 plan (broadphase grid + sleeping, mahjong host wiring).
 
 ## MCP
 
