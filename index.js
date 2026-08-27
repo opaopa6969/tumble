@@ -1,12 +1,12 @@
-// rigid-body engine (M1) — general 3D rigid bodies with box colliders + a ground
+// rigid-body engine (M2) — general 3D rigid bodies with box colliders + a ground
 // plane, resolved with XPBD contacts. Box INERTIA (not isotropic) so flat bodies
 // tumble and settle on a face the way a mahjong tile / die does. Pure,
 // dependency-free, deterministic (fixed substeps, no Math.random) — headless
 // testable, same 流儀 as motion-engine / xpbd-body.
 //
-// M1 scope: Body(box) + gravity + box↔ground-plane contacts (non-penetration via
-// the 8 corners) + damping. M2 adds box↔box (SAT + manifold = stacking),
-// M3 broadphase + sleeping, M4 the mahjong wiring (tiles/dice).
+// M2 scope: Body(box) + gravity + box↔ground-plane and box↔box contacts (SAT over
+// 15 axes + clipped manifold = stacking) + Coulomb friction and damping.
+// M3 adds broadphase + sleeping, M4 the mahjong wiring (tiles/dice).
 
 const v = {
   add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
@@ -15,6 +15,7 @@ const v = {
   dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
   cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
   len: (a) => Math.hypot(a[0], a[1], a[2]),
+  norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; },
 };
 const q = {
   mul: (a, b) => [
@@ -33,6 +34,168 @@ const q = {
   },
 };
 
+const BOX_EDGES = (() => {
+  const out = [];
+  for (let i = 0; i < 8; i++) {
+    if (!(i & 1)) out.push([i, i | 1]);
+    if (!(i & 2)) out.push([i, i | 2]);
+    if (!(i & 4)) out.push([i, i | 4]);
+  }
+  return out;
+})();
+
+const boxAxes = (b) => [
+  q.rot(b.q, [1, 0, 0]),
+  q.rot(b.q, [0, 1, 0]),
+  q.rot(b.q, [0, 0, 1]),
+];
+
+const projectionRadius = (b, axes, n) =>
+  b.half[0] * Math.abs(v.dot(axes[0], n)) +
+  b.half[1] * Math.abs(v.dot(axes[1], n)) +
+  b.half[2] * Math.abs(v.dot(axes[2], n));
+
+const pointInBox = (p, b, axes, eps = 1e-8) => {
+  const d = v.sub(p, b.p);
+  return axes.every((axis, i) => Math.abs(v.dot(d, axis)) <= b.half[i] + eps);
+};
+
+// Clip a segment against an OBB's six face planes. Returning both the entry and
+// exit point makes edge/edge and rotated face intersections deterministic.
+const clipSegmentToBox = (p0, p1, b, axes) => {
+  const d = v.sub(p1, p0); let lo = 0; let hi = 1;
+  const rel = v.sub(p0, b.p);
+  for (let i = 0; i < 3; i++) {
+    const start = v.dot(rel, axes[i]); const delta = v.dot(d, axes[i]);
+    if (Math.abs(delta) < 1e-12) {
+      if (Math.abs(start) > b.half[i] + 1e-8) return [];
+      continue;
+    }
+    let a = (-b.half[i] - start) / delta;
+    let z = (b.half[i] - start) / delta;
+    if (a > z) [a, z] = [z, a];
+    lo = Math.max(lo, a); hi = Math.min(hi, z);
+    if (lo > hi + 1e-10) return [];
+  }
+  const at = (t) => v.add(p0, v.scale(d, Math.max(0, Math.min(1, t))));
+  return Math.abs(hi - lo) < 1e-9 ? [at((lo + hi) * 0.5)] : [at(lo), at(hi)];
+};
+
+const uniquePoints = (points) => {
+  const out = [];
+  for (const p of points) {
+    if (!out.some((x) => v.len(v.sub(x, p)) < 1e-7)) out.push(p);
+  }
+  return out;
+};
+
+const supportPoint = (b, axes, n) => {
+  let p = b.p.slice();
+  for (let i = 0; i < 3; i++) p = v.add(p, v.scale(axes[i], v.dot(axes[i], n) >= 0 ? b.half[i] : -b.half[i]));
+  return p;
+};
+
+const clipPolygonPlane = (polygon, center, axis, limit) => {
+  const out = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i]; const b = polygon[(i + 1) % polygon.length];
+    const da = v.dot(v.sub(a, center), axis) - limit;
+    const db = v.dot(v.sub(b, center), axis) - limit;
+    if (da <= 1e-9) out.push(a);
+    if ((da < 0 && db > 0) || (da > 0 && db < 0)) {
+      const t = da / (da - db);
+      out.push(v.add(a, v.scale(v.sub(b, a), t)));
+    }
+  }
+  return out;
+};
+
+// Clip the incident face polygon by the four side planes of a reference face.
+const faceManifold = (reference, incident, refAxes, incAxes, refAxis, refOut) => {
+  let incidentAxis = 0; let alignment = Math.abs(v.dot(incAxes[0], refOut));
+  for (let i = 1; i < 3; i++) {
+    const next = Math.abs(v.dot(incAxes[i], refOut));
+    if (next > alignment) { incidentAxis = i; alignment = next; }
+  }
+  const faceSign = v.dot(incAxes[incidentAxis], refOut) > 0 ? -1 : 1;
+  const center = v.add(incident.p, v.scale(incAxes[incidentAxis], faceSign * incident.half[incidentAxis]));
+  const tangent = [0, 1, 2].filter((i) => i !== incidentAxis);
+  let polygon = [
+    v.add(v.add(center, v.scale(incAxes[tangent[0]], incident.half[tangent[0]])), v.scale(incAxes[tangent[1]], incident.half[tangent[1]])),
+    v.add(v.add(center, v.scale(incAxes[tangent[0]], -incident.half[tangent[0]])), v.scale(incAxes[tangent[1]], incident.half[tangent[1]])),
+    v.add(v.add(center, v.scale(incAxes[tangent[0]], -incident.half[tangent[0]])), v.scale(incAxes[tangent[1]], -incident.half[tangent[1]])),
+    v.add(v.add(center, v.scale(incAxes[tangent[0]], incident.half[tangent[0]])), v.scale(incAxes[tangent[1]], -incident.half[tangent[1]])),
+  ];
+  for (const i of [0, 1, 2].filter((x) => x !== refAxis)) {
+    polygon = clipPolygonPlane(polygon, reference.p, refAxes[i], reference.half[i]);
+    polygon = clipPolygonPlane(polygon, reference.p, v.scale(refAxes[i], -1), reference.half[i]);
+  }
+  return uniquePoints(polygon.filter((p) => v.dot(v.sub(p, reference.p), refOut) <= reference.half[refAxis] + 1e-8)
+    .map((p) => {
+      const depth = reference.half[refAxis] - v.dot(v.sub(p, reference.p), refOut);
+      return v.add(p, v.scale(refOut, depth * 0.5));
+    }));
+};
+
+// OBB SAT over all 15 conventional axes. The manifold is the clipped
+// intersection boundary projected onto the middle of the two support planes.
+const boxContact = (a, b) => {
+  const aa = boxAxes(a); const ba = boxAxes(b); const delta = v.sub(b.p, a.p);
+  let best = null; let order = 0;
+  const test = (raw) => {
+    const length = v.len(raw); const axisOrder = order++;
+    if (length < 1e-10) return true; // parallel edges: redundant SAT axis
+    let axis = v.scale(raw, 1 / length);
+    const distance = v.dot(delta, axis);
+    const depth = projectionRadius(a, aa, axis) + projectionRadius(b, ba, axis) - Math.abs(distance);
+    if (depth <= 0) return false;
+    if (distance < 0) axis = v.scale(axis, -1);
+    if (!best || depth < best.depth - 1e-10 || (Math.abs(depth - best.depth) <= 1e-10 && axisOrder < best.order)) {
+      best = { normal: axis, depth, order: axisOrder };
+    }
+    return true;
+  };
+  for (const axis of aa) if (!test(axis)) return null;
+  for (const axis of ba) if (!test(axis)) return null;
+  for (const x of aa) for (const y of ba) if (!test(v.cross(x, y))) return null;
+
+  const n = best.normal;
+  let points = best.order < 3
+    ? faceManifold(a, b, aa, ba, best.order, n)
+    : best.order < 6
+      ? faceManifold(b, a, ba, aa, best.order - 3, v.scale(n, -1))
+      : [];
+  if (!points.length) {
+    const ac = a.corners(); const bc = b.corners(); const candidates = [];
+    for (const p of ac) if (pointInBox(p, b, ba)) candidates.push(p);
+    for (const p of bc) if (pointInBox(p, a, aa)) candidates.push(p);
+    for (const [i, j] of BOX_EDGES) candidates.push(...clipSegmentToBox(ac[i], ac[j], b, ba));
+    for (const [i, j] of BOX_EDGES) candidates.push(...clipSegmentToBox(bc[i], bc[j], a, aa));
+    const plane = (v.dot(a.p, n) + projectionRadius(a, aa, n) + v.dot(b.p, n) - projectionRadius(b, ba, n)) * 0.5;
+    points = uniquePoints(candidates.map((p) => v.add(p, v.scale(n, plane - v.dot(p, n)))));
+  }
+  if (!points.length) points = [v.scale(v.add(supportPoint(a, aa, n), supportPoint(b, ba, v.scale(n, -1))), 0.5)];
+  // Four contacts are sufficient for a convex box face and avoid applying the
+  // same positional correction repeatedly when clipped edges share endpoints.
+  if (points.length > 4) {
+    const helper = Math.abs(n[0]) < 0.8 ? [1, 0, 0] : [0, 1, 0];
+    const u = v.norm(v.cross(n, helper)); const w = v.cross(n, u); const picked = [];
+    for (const axis of [u, w]) {
+      for (const sign of [-1, 1]) {
+        let choice = points[0]; let score = sign * v.dot(choice, axis);
+        for (const p of points.slice(1)) {
+          const next = sign * v.dot(p, axis);
+          if (next < score) { choice = p; score = next; }
+        }
+        if (!picked.includes(choice)) picked.push(choice);
+      }
+    }
+    for (const p of points) if (picked.length < 4 && !picked.includes(p)) picked.push(p);
+    points = picked;
+  }
+  return { normal: n, depth: best.depth, points };
+};
+
 export class Body {
   // { pos, quat?, half:[hx,hy,hz], mass, fixed? }
   constructor(o) {
@@ -40,6 +203,7 @@ export class Body {
     this.v = [0, 0, 0]; this.w = [0, 0, 0];
     this.half = o.half ? o.half.slice() : [0.5, 0.5, 0.5];
     this.fixed = !!o.fixed;
+    this.friction = o.friction != null ? o.friction : 0.5;
     const m = o.mass || 1;
     this.invM = this.fixed ? 0 : 1 / m;
     // box inertia diagonal (principal axes): I_x = m/12 (dy²+dz²), d = 2h
@@ -70,6 +234,7 @@ export class World {
     this.floor = o.floor != null ? o.floor : 0;     // ground plane y = floor, normal +y
     this.linDamp = o.linDamp != null ? o.linDamp : 0.999;
     this.angDamp = o.angDamp != null ? o.angDamp : 0.995;
+    this.contactIterations = o.contactIterations != null ? o.contactIterations : 8;
     this.bodies = [];
   }
   add(b) { this.bodies.push(b); return b; }
@@ -77,6 +242,7 @@ export class World {
   step(dt, substeps = 8) {
     const h = dt / substeps;
     for (let s = 0; s < substeps; s++) {
+      const contacts = new Map();
       for (const b of this.bodies) {
         if (b.fixed) continue;
         b.v = v.add(b.v, v.scale(this.gravity, h));
@@ -85,8 +251,12 @@ export class World {
         const w = b.w; const dq = q.mul([w[0], w[1], w[2], 0], b.q);
         b.q = q.norm([b.q[0] + 0.5 * h * dq[0], b.q[1] + 0.5 * h * dq[1], b.q[2] + 0.5 * h * dq[2], b.q[3] + 0.5 * h * dq[3]]);
       }
-      // a couple of iterations help the multi-corner manifold converge
-      for (let it = 0; it < 2; it++) this._floorContacts();
+      // Iterating floor and box manifolds together propagates corrections from
+      // the floor through a stack without making result order non-deterministic.
+      for (let it = 0; it < this.contactIterations; it++) {
+        this._floorContacts(contacts);
+        this._boxContacts(contacts);
+      }
       for (const b of this.bodies) {
         if (b.fixed) continue;
         b.v = v.scale(v.scale(v.sub(b.p, b.pp), 1 / h), this.linDamp);
@@ -94,15 +264,17 @@ export class World {
         if (dq[3] < 0) dq = [-dq[0], -dq[1], -dq[2], -dq[3]];
         b.w = v.scale([2 / h * dq[0], 2 / h * dq[1], 2 / h * dq[2]], this.angDamp);
       }
+      this._frictionContacts(contacts, h);
     }
   }
 
   // box ↔ ground plane: each of the 8 corners that dips below the floor is a
   // non-penetration contact (XPBD, compliance 0). Off-centre contacts torque the
   // body via its box inertia → it tumbles and settles onto a face.
-  _floorContacts() {
+  _floorContacts(contacts) {
     const n = [0, 1, 0];
-    for (const b of this.bodies) {
+    for (let bi = 0; bi < this.bodies.length; bi++) {
+      const b = this.bodies[bi]; let normalLambda = 0; const points = [];
       if (b.fixed) continue;
       for (const c of b.corners()) {
         const C = this.floor - c[1];                 // penetration depth (>0 below)
@@ -112,8 +284,70 @@ export class World {
         const wgen = b.invM + v.dot(rn, b.applyInvI(rn));
         if (wgen <= 0) continue;
         const dl = C / wgen;
+        normalLambda += dl; points.push(c);
         b.p = v.add(b.p, v.scale(n, b.invM * dl));
         b.applyDRot(b.applyInvI(v.cross(r, v.scale(n, dl))));
+      }
+      if (normalLambda > 0) {
+        const key = `f:${bi}`; const previous = contacts.get(key);
+        if (!previous || normalLambda > previous.normalLambda) contacts.set(key, { a: null, b, normal: n, points, normalLambda });
+      }
+    }
+  }
+
+  _boxContacts(contacts) {
+    for (let i = 0; i < this.bodies.length; i++) for (let j = i + 1; j < this.bodies.length; j++) {
+      const a = this.bodies[i]; const b = this.bodies[j];
+      if (a.fixed && b.fixed) continue;
+      const hit = boxContact(a, b);
+      if (!hit) continue;
+      let normalLambda = 0;
+      for (const p of hit.points) {
+        const ra = v.sub(p, a.p); const rb = v.sub(p, b.p); const n = hit.normal;
+        const ran = v.cross(ra, n); const rbn = v.cross(rb, n);
+        const wgen = a.invM + b.invM + v.dot(ran, a.applyInvI(ran)) + v.dot(rbn, b.applyInvI(rbn));
+        if (wgen <= 0) continue;
+        const dl = hit.depth / (wgen * hit.points.length);
+        normalLambda += dl;
+        if (!a.fixed) {
+          a.p = v.add(a.p, v.scale(n, -a.invM * dl));
+          a.applyDRot(a.applyInvI(v.cross(ra, v.scale(n, -dl))));
+        }
+        if (!b.fixed) {
+          b.p = v.add(b.p, v.scale(n, b.invM * dl));
+          b.applyDRot(b.applyInvI(v.cross(rb, v.scale(n, dl))));
+        }
+      }
+      const key = `b:${i}:${j}`; const previous = contacts.get(key);
+      if (!previous || normalLambda > previous.normalLambda) contacts.set(key, { a, b, normal: hit.normal, points: hit.points, normalLambda });
+    }
+  }
+
+  _frictionContacts(contacts, h) {
+    for (const contact of contacts.values()) {
+      const { a, b, normal: n, points, normalLambda } = contact;
+      const mu = a ? Math.sqrt(a.friction * b.friction) : b.friction;
+      if (mu <= 0 || !points.length) continue;
+      const maxImpulse = mu * normalLambda / (h * points.length);
+      for (const p of points) {
+        const ra = a ? v.sub(p, a.p) : [0, 0, 0]; const rb = v.sub(p, b.p);
+        const va = a ? v.add(a.v, v.cross(a.w, ra)) : [0, 0, 0];
+        const vb = v.add(b.v, v.cross(b.w, rb)); const relative = v.sub(vb, va);
+        const tangentVelocity = v.sub(relative, v.scale(n, v.dot(relative, n)));
+        const speed = v.len(tangentVelocity); if (speed < 1e-10) continue;
+        const t = v.scale(tangentVelocity, 1 / speed);
+        const rat = a ? v.cross(ra, t) : [0, 0, 0]; const rbt = v.cross(rb, t);
+        const wgen = (a ? a.invM + v.dot(rat, a.applyInvI(rat)) : 0) + b.invM + v.dot(rbt, b.applyInvI(rbt));
+        if (wgen <= 0) continue;
+        const jt = Math.min(speed / wgen, maxImpulse); const impulse = v.scale(t, -jt);
+        if (a && !a.fixed) {
+          a.v = v.add(a.v, v.scale(impulse, -a.invM));
+          a.w = v.add(a.w, a.applyInvI(v.cross(ra, v.scale(impulse, -1))));
+        }
+        if (!b.fixed) {
+          b.v = v.add(b.v, v.scale(impulse, b.invM));
+          b.w = v.add(b.w, b.applyInvI(v.cross(rb, impulse)));
+        }
       }
     }
   }

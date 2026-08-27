@@ -76,7 +76,7 @@ Substepped XPBD (position-based). Per substep `h = dt / substeps`:
 
 1. **Predict.** `v += g·h`; save `pp = p`, `pq = q`; integrate `p += v·h` and the
    quaternion by `w`.
-2. **Solve contacts** (a couple of iterations so multi-corner manifolds converge):
+2. **Solve contacts** (iterated so floor and box manifolds propagate through a stack):
    each penetrating contact is a non-penetration constraint with compliance 0.
    For a contact at offset `r` from COM with normal `n` and depth `C`:
 
@@ -92,16 +92,17 @@ Substepped XPBD (position-based). Per substep `h = dt / substeps`:
 3. **Recover velocities** from the position change: `v = (p − pp)/h`,
    `w = 2·(q · pq⁻¹)_xyz / h`, each scaled by linear/angular damping.
 
-**Coulomb friction** [M2]: the tangential position correction is clamped to
-`μ · Δλ_normal`, so stacks don't slide apart and a tile that lands at an angle
-sticks instead of skating.
+**Coulomb friction** [M2]: after velocity recovery, a tangential contact impulse
+is clamped to `μ · Δλ_normal / h`. Box-pair friction uses the geometric mean of
+the two coefficients, so stacks don't slide apart and a tile that lands at an
+angle sticks instead of skating.
 
 ## Milestones
 
 | | scope | state |
 |---|---|---|
 | **M1** | `Body` + box inertia + integrator + **box↔ground-plane** contacts (the 8 corners that dip below the plane become XPBD contacts) → drop a tilted box, it tumbles and settles on a face | **DONE** |
-| **M2** | **box↔box**: SAT over 15 axes (3+3 face normals + 9 edge×edge) → contact **manifold** via face clipping; Coulomb friction. = **stacking** = the mahjong wall | planned |
+| **M2** | **box↔box**: SAT over 15 axes (3+3 face normals + 9 edge×edge) → clipped contact **manifold**; Coulomb friction. = **stacking** = the mahjong wall | **DONE** |
 | **M3** | **broadphase**: uniform spatial **grid** (many tiles → candidate pairs only); **sleeping** — settled islands stop simulating (a wall of ~136 tiles can't all run forever) | planned |
 | **M4** | **host wiring**: physics-shuffled wall, dice roll → read the top face, discard toss onto the river. Determinism keeps seeded deals reproducible | planned |
 
@@ -119,11 +120,11 @@ sticks instead of skating.
 ## API
 
 ```js
-new World({ gravity = [0,-9.81,0], floor = 0, linDamp = 0.999, angDamp = 0.995 })
+new World({ gravity = [0,-9.81,0], floor = 0, linDamp = 0.999, angDamp = 0.995, contactIterations = 8 })
 world.add(body) → body
 world.step(dt, substeps = 8)
 
-new Body({ pos, quat = [0,0,0,1], half = [0.5,0.5,0.5], mass = 1, fixed = false })
+new Body({ pos, quat = [0,0,0,1], half = [0.5,0.5,0.5], mass = 1, fixed = false, friction = 0.5 })
 body.p / body.q / body.v / body.w        // read state
 body.corners()                            // 8 world-space corners
 ```
