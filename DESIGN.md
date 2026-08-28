@@ -103,7 +103,8 @@ angle sticks instead of skating.
 |---|---|---|
 | **M1** | `Body` + box inertia + integrator + **box↔ground-plane** contacts (the 8 corners that dip below the plane become XPBD contacts) → drop a tilted box, it tumbles and settles on a face | **DONE** |
 | **M2** | **box↔box**: SAT over 15 axes (3+3 face normals + 9 edge×edge) → clipped contact **manifold**; Coulomb friction. = **stacking** = the mahjong wall | **DONE** |
-| **M3** | **broadphase**: uniform spatial **grid** (many tiles → candidate pairs only); **sleeping** — settled islands stop simulating (a wall of ~136 tiles can't all run forever) | planned |
+| **M3a** | **broadphase**: uniform spatial **grid** (each body hashed into the cell of its centre; candidate pairs from the 3×3×3 neighbourhood). Replaces O(n²) pair enumeration so many tiles are cheap, while staying deterministic (sorted pairs, no `Math.random`). | **DONE** |
+| **M3b** | **sleeping** — settled islands stop simulating (a wall of ~136 tiles can't all run forever); wake on contact. | planned |
 | **M4** | **host wiring**: physics-shuffled wall, dice roll → read the top face, discard toss onto the river. Determinism keeps seeded deals reproducible | planned |
 
 ### Narrowphase detail
@@ -117,10 +118,22 @@ angle sticks instead of skating.
   face against the reference face's side planes. Each clipped point below the
   reference face is fed to the same XPBD contact solver as M1.
 
+### Broadphase detail (M3a)
+
+- A **uniform spatial grid** of edge `cellSize` (default `2`) replaces the
+  O(n²) pair loop. Each body is hashed into the single cell containing its
+  centre; candidate pairs come from searching that cell and its 26 neighbours
+  (3×3×3 block), so two touching bodies are always found even when they straddle
+  a cell boundary (no false negatives while `cellSize ≥ body diameter`).
+- Candidate pairs are sorted into the brute-force order (`i` ascending, then `j`
+  ascending), so the trajectory is **bit-identical** whether broadphase is on or
+  off for identical candidate sets — determinism is preserved exactly.
+- `broadphase: false` on `World` falls back to the plain O(n²) enumeration.
+
 ## API
 
 ```js
-new World({ gravity = [0,-9.81,0], floor = 0, linDamp = 0.999, angDamp = 0.995, contactIterations = 8 })
+new World({ gravity = [0,-9.81,0], floor = 0, linDamp = 0.999, angDamp = 0.995, contactIterations = 8, broadphase = true, cellSize = 2 })
 world.add(body) → body
 world.step(dt, substeps = 8)
 
