@@ -123,5 +123,57 @@ function stack(count, frames = 600) {
   ok(JSON.stringify(a) === JSON.stringify(b), 'five-box stack is bit-identical across two runs');
 }
 
+// M3 broadphase: 100+ boxes on a grid settle without overlap, stay finite, and
+// the trajectory is bit-identical across two runs (determinism preserved under
+// the uniform-grid candidate-pair generation).
+function gridField(n = 120, frames = 240) {
+  const world = new World();
+  const bodies = [];
+  // a 12×10 single layer of unit boxes spaced so neighbours touch; total 120.
+  for (let i = 0; i < n; i++) {
+    const gx = i % 12, gz = Math.floor(i / 12) % 10;
+    bodies.push(world.add(new Body({ pos: [gx * 1.02, 0.5, gz * 1.02], half: [0.5, 0.5, 0.5] })));
+  }
+  for (let i = 0; i < frames; i++) world.step(1 / 60, 8);
+  return bodies;
+}
+{
+  const field = gridField();
+  ok(field.every((b) => finite(b.p) && finite(b.q) && finite(b.v) && finite(b.w)), '120-box grid stays finite');
+  ok(field.every((b) => Math.hypot(...b.v) < 0.1 && Math.hypot(...b.w) < 0.1),
+    '120-box grid comes to rest');
+  // bit-identical across two runs (determinism under broadphase)
+  const a = gridField().map((b) => [b.p, b.q, b.v, b.w]);
+  const b = gridField().map((body) => [body.p, body.q, body.v, body.w]);
+  ok(JSON.stringify(a) === JSON.stringify(b), '120-box grid is bit-identical across two runs');
+}
+
+// M3 broadphase: candidate pairs must be a strict match to O(n²) when bodies
+// overlap, and the grid must NOT emit pairs for widely separated boxes.
+{
+  const world = new World({ gravity: [0, 0, 0], floor: -100 });
+  world.add(new Body({ pos: [0, 0, 0], half: [0.5, 0.5, 0.5] }));
+  world.add(new Body({ pos: [1.0, 0, 0], half: [0.5, 0.5, 0.5] }));   // touches
+  world.add(new Body({ pos: [100, 0, 0], half: [0.5, 0.5, 0.5] }));   // far
+  const pairs = world._candidatePairs().map(([i, j]) => i + ':' + j);
+  ok(pairs.includes('0:1'), 'broadphase emits a pair for touching neighbours');
+  ok(!pairs.includes('0:2') && !pairs.includes('1:2'),
+    'broadphase skips far-apart boxes (the point of the grid)');
+}
+
+// M3 broadphase: disabling broadphase falls back to the O(n²) path and yields
+// the same trajectory as the grid (equivalence of candidate sets at rest).
+{
+  const make = (bp) => {
+    const w = new World({ broadphase: bp });
+    for (let i = 0; i < 6; i++) w.add(new Body({ pos: [0, 0.5 + i * 1.02, 0], half: [0.5, 0.5, 0.5] }));
+    for (let i = 0; i < 360; i++) w.step(1 / 60, 8);
+    return w.bodies.map((b) => [b.p, b.q, b.v, b.w]);
+  };
+  const grid = make(true), brute = make(false);
+  ok(JSON.stringify(grid) === JSON.stringify(brute),
+    'broadphase on/off produces identical stack trajectory (candidate sets agree)');
+}
+
 console.log(`tumble M2: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

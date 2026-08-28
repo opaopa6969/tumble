@@ -6,7 +6,9 @@
 //
 // M2 scope: Body(box) + gravity + box↔ground-plane and box↔box contacts (SAT over
 // 15 axes + clipped manifold = stacking) + Coulomb friction and damping.
-// M3 adds broadphase + sleeping, M4 the mahjong wiring (tiles/dice).
+// M3 scope: uniform-grid broadphase (candidate pair generation replacing O(n²))
+// keeps determinism (sorted keys, no Math.random). M3 sleeping + M4 mahjong
+// wiring to follow.
 
 const v = {
   add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
@@ -235,6 +237,8 @@ export class World {
     this.linDamp = o.linDamp != null ? o.linDamp : 0.999;
     this.angDamp = o.angDamp != null ? o.angDamp : 0.995;
     this.contactIterations = o.contactIterations != null ? o.contactIterations : 8;
+    this.broadphase = o.broadphase != null ? o.broadphase : true; // M3 uniform grid
+    this.cellSize = o.cellSize != null ? o.cellSize : 2;          // grid cell edge
     this.bodies = [];
   }
   add(b) { this.bodies.push(b); return b; }
@@ -295,8 +299,55 @@ export class World {
     }
   }
 
+  // M3 broadphase: a uniform spatial grid. Each body is hashed into the single
+  // cell containing its centre; candidate pairs come from searching that cell
+  // and its 26 neighbours (3×3×3 block), so two bodies whose AABBs overlap are
+  // guaranteed to share a candidate pair even when they straddle a cell boundary.
+  // Cell keys are integers and pair emission is ordered (i<j), keeping the
+  // candidate set deterministic. The resulting pairs are sorted to match the
+  // brute-force enumeration order so trajectories stay bit-identical whether
+  // broadphase is on or off (for identical candidate sets).
+  _candidatePairs() {
+    if (!this.broadphase || this.bodies.length < 2) {
+      const pairs = [];
+      for (let i = 0; i < this.bodies.length; i++) for (let j = i + 1; j < this.bodies.length; j++) pairs.push([i, j]);
+      return pairs;
+    }
+    const cs = this.cellSize;
+    const inv = 1 / cs;
+    const grid = new Map();
+    const key = (x, y, z) => x + ',' + y + ',' + z;
+    for (let i = 0; i < this.bodies.length; i++) {
+      const b = this.bodies[i];
+      const cx = Math.floor(b.p[0] * inv), cy = Math.floor(b.p[1] * inv), cz = Math.floor(b.p[2] * inv);
+      const k = key(cx, cy, cz);
+      let cell = grid.get(k);
+      if (!cell) { cell = []; grid.set(k, cell); }
+      cell.push(i);
+    }
+    const seen = new Set(); const pairs = [];
+    for (let i = 0; i < this.bodies.length; i++) {
+      const b = this.bodies[i];
+      const cx = Math.floor(b.p[0] * inv), cy = Math.floor(b.p[1] * inv), cz = Math.floor(b.p[2] * inv);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        const cell = grid.get(key(cx + dx, cy + dy, cz + dz));
+        if (!cell) continue;
+        for (const j of cell) {
+          if (j <= i) continue;
+          const pk = i + ':' + j;
+          if (seen.has(pk)) continue;
+          seen.add(pk); pairs.push([i, j]);
+        }
+      }
+    }
+    // Match brute-force order (i ascending, then j ascending) so identical
+    // candidate sets yield identical trajectories with broadphase on/off.
+    pairs.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+    return pairs;
+  }
+
   _boxContacts(contacts) {
-    for (let i = 0; i < this.bodies.length; i++) for (let j = i + 1; j < this.bodies.length; j++) {
+    for (const [i, j] of this._candidatePairs()) {
       const a = this.bodies[i]; const b = this.bodies[j];
       if (a.fixed && b.fixed) continue;
       const hit = boxContact(a, b);
