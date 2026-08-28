@@ -176,4 +176,80 @@ function gridField(n = 120, frames = 240) {
 }
 
 console.log(`tumble M2: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
+
+// M3b sleeping: a box that settles on the floor goes to sleep after sleepTime
+// seconds of being below the velocity thresholds; its velocity is zeroed.
+{
+  const world = new World();
+  const b = world.add(new Body({ pos: [0, 2.0, 0], quat: TILT, half: [0.4, 0.05, 0.3] }));
+  for (let i = 0; i < 600; i++) world.step(1 / 60, 8);   // 10s — well past sleepTime
+  ok(b.sleeping === true, 'settled box goes to sleep (sleeping flag set)');
+  ok(b.v[0] === 0 && b.v[1] === 0 && b.v[2] === 0, 'sleeping body has zero linear velocity');
+  ok(b.w[0] === 0 && b.w[1] === 0 && b.w[2] === 0, 'sleeping body has zero angular velocity');
+}
+
+// M3b sleeping: a dropped box onto a stack must keep sleeping until disturbed,
+// and a moving neighbour that contacts a sleeping body wakes it.
+{
+  const world = new World();
+  const floor = world.add(new Body({ pos: [0, -0.5, 0], half: [4, 0.5, 4], fixed: true }));
+  const rest = world.add(new Body({ pos: [0, 0.5, 0], half: [0.5, 0.5, 0.5] }));
+  // let the box settle and sleep
+  for (let i = 0; i < 600; i++) world.step(1 / 60, 8);
+  ok(rest.sleeping === true, 'box on floor sleeps after settling');
+  // drop a mover onto the resting box from above — it must wake the sleeper
+  const mover = world.add(new Body({ pos: [0, 3.0, 0], half: [0.5, 0.5, 0.5] }));
+  for (let i = 0; i < 30; i++) world.step(1 / 60, 8);   // mover is still moving
+  ok(rest.sleeping === false, 'sleeping box wakes when a moving neighbour approaches');
+}
+
+// M3b sleeping: a settled stack can fully sleep, and disabling sleeping keeps
+// bodies awake (sleeping flag never set) without breaking the trajectory.
+{
+  const stackSleep = (sleepOn) => {
+    const w = new World({ sleep: sleepOn });
+    const bodies = [];
+    for (let i = 0; i < 5; i++) bodies.push(w.add(new Body({ pos: [0, 0.5 + i * 1.02, 0], half: [0.5, 0.5, 0.5] })));
+    for (let i = 0; i < 720; i++) w.step(1 / 60, 8);    // 12s
+    return w;
+  };
+  const on = stackSleep(true);
+  ok(on.bodies.every((b) => b.sleeping === true), 'five-box stack fully sleeps when sleep is on');
+  const off = stackSleep(false);
+  ok(off.bodies.every((b) => b.sleeping === false), 'no body sleeps when sleep is disabled');
+}
+
+// M3b sleeping: determinism is preserved — a settled+slept multi-body field is
+// bit-identical across two runs (sleep is thresholded + ordered, no RNG).
+{
+  const field = (n = 60, frames = 480) => {
+    const w = new World();
+    const bodies = [];
+    for (let i = 0; i < n; i++) {
+      const gx = i % 10, gz = Math.floor(i / 10) % 6;
+      bodies.push(w.add(new Body({ pos: [gx * 1.02, 0.5, gz * 1.02], half: [0.5, 0.5, 0.5] })));
+    }
+    for (let i = 0; i < frames; i++) w.step(1 / 60, 8);
+    return bodies.map((b) => [b.p, b.q, b.v, b.w, b.sleeping]);
+  };
+  const a = field();
+  const b = field();
+  ok(JSON.stringify(a) === JSON.stringify(b), '60-box grid with sleeping is bit-identical across two runs');
+}
+
+// M3b sleeping: a slept stack stays bit-identical to itself run for longer —
+// i.e. sleeping does not introduce drift once bodies are asleep (stable).
+{
+  const make = (frames) => {
+    const w = new World();
+    for (let i = 0; i < 3; i++) w.add(new Body({ pos: [0, 0.5 + i * 1.02, 0], half: [0.5, 0.5, 0.5] }));
+    for (let i = 0; i < frames; i++) w.step(1 / 60, 8);
+    return w.bodies.map((b) => [b.p, b.q, b.v, b.w, b.sleeping]);
+  };
+  const short = make(600), long = make(900);
+  ok(JSON.stringify(short) === JSON.stringify(long),
+    'slept stack is stable (no drift after sleeping)');
+}
+
+console.log(`tumble M3: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

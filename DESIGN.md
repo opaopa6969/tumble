@@ -104,7 +104,7 @@ angle sticks instead of skating.
 | **M1** | `Body` + box inertia + integrator + **box↔ground-plane** contacts (the 8 corners that dip below the plane become XPBD contacts) → drop a tilted box, it tumbles and settles on a face | **DONE** |
 | **M2** | **box↔box**: SAT over 15 axes (3+3 face normals + 9 edge×edge) → clipped contact **manifold**; Coulomb friction. = **stacking** = the mahjong wall | **DONE** |
 | **M3a** | **broadphase**: uniform spatial **grid** (each body hashed into the cell of its centre; candidate pairs from the 3×3×3 neighbourhood). Replaces O(n²) pair enumeration so many tiles are cheap, while staying deterministic (sorted pairs, no `Math.random`). | **DONE** |
-| **M3b** | **sleeping** — settled islands stop simulating (a wall of ~136 tiles can't all run forever); wake on contact. | planned |
+| **M3b** | **sleeping** — settled islands stop simulating (a wall of ~136 tiles can't all run forever); wake on contact. | **DONE** |
 | **M4** | **host wiring**: physics-shuffled wall, dice roll → read the top face, discard toss onto the river. Determinism keeps seeded deals reproducible | planned |
 
 ### Narrowphase detail
@@ -130,10 +130,28 @@ angle sticks instead of skating.
   off for identical candidate sets — determinism is preserved exactly.
 - `broadphase: false` on `World` falls back to the plain O(n²) enumeration.
 
+### Sleeping detail (M3b)
+
+- A body whose linear speed `|v|` and angular speed `|w|` stay below
+  `sleepVel` (default `0.05`) and `sleepAng` (default `0.20`) for `sleepTime`
+  (default `1.0s`) goes to **sleep**: `sleeping = true` and `v = w = 0`.
+- A sleeping body **skips** predict + velocity-recovery (no integration), and is
+  treated as **inert** in contacts (like `fixed`): it can still support a stack
+  but is not displaced. A pair where both bodies sleep generates no contact.
+- **Wake on contact.** A sleeping body sharing a candidate pair with a *moving*
+  neighbour (above the sleep thresholds) is woken and its timer reset. Near-rest
+  neighbours do **not** wake a sleeper, so a fully settled stack can sleep
+  together instead of one body waking another forever.
+- `sleep: false` on `World` disables the whole mechanism (bodies never sleep);
+  the trajectory then matches the pre-M3b engine exactly.
+- **Determinism is preserved**: the wake/sleep decision is thresholded and the
+  candidate-pair order is fixed (sorted), so identical setup → bit-identical
+  trajectory including the `sleeping` flags.
+
 ## API
 
 ```js
-new World({ gravity = [0,-9.81,0], floor = 0, linDamp = 0.999, angDamp = 0.995, contactIterations = 8, broadphase = true, cellSize = 2 })
+new World({ gravity = [0,-9.81,0], floor = 0, linDamp = 0.999, angDamp = 0.995, contactIterations = 8, broadphase = true, cellSize = 2, sleep = true, sleepVel = 0.05, sleepAng = 0.20, sleepTime = 1.0 })
 world.add(body) → body
 world.step(dt, substeps = 8)
 

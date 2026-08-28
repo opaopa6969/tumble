@@ -28,7 +28,7 @@ tile.q;   // [x, y, z, w] orientation quaternion
 
 ## API
 
-- `new World({ gravity?, floor?, linDamp?, angDamp?, contactIterations?, broadphase?, cellSize? })` — `gravity` default `[0,-9.81,0]`, `floor` is the ground-plane height `y = floor` (normal `+y`), default `0`; `linDamp` default `0.999`, `angDamp` default `0.995`; `contactIterations` default `8` propagates manifold corrections through stacks; `broadphase` default `true` enables the M3 uniform-grid candidate-pair generation; `cellSize` default `2` is the grid edge (keep ≥ body diameter to avoid false negatives).
+- `new World({ gravity?, floor?, linDamp?, angDamp?, contactIterations?, broadphase?, cellSize?, sleep?, sleepVel?, sleepAng?, sleepTime? })` — `gravity` default `[0,-9.81,0]`, `floor` is the ground-plane height `y = floor` (normal `+y`), default `0`; `linDamp` default `0.999`, `angDamp` default `0.995`; `contactIterations` default `8` propagates manifold corrections through stacks; `broadphase` default `true` enables the M3 uniform-grid candidate-pair generation; `cellSize` default `2` is the grid edge (keep ≥ body diameter to avoid false negatives); `sleep` default `true` enables M3b sleeping (bodies still for `sleepTime` seconds stop integrating); `sleepVel` default `0.05` / `sleepAng` default `0.20` are the linear/angular rest thresholds; `sleepTime` default `1.0` is the still-time before sleep.
 - `world.add(body)` → the body. `world.step(dt, substeps = 8)` — advance one fixed frame (`substeps` default `8`).
 - `new Body({ pos, quat?, half?, mass?, fixed?, friction? })` — `pos` **required** `[x,y,z]`; `quat` default `[0,0,0,1]`; `half` = box half-extents `[hx,hy,hz]` (default `0.5³`); `mass` default `1`; `friction` is the Coulomb coefficient (default `0.5`); `fixed: true` makes it immovable (`invM = 0`). Read `body.p` (position), `body.q` (quat), `body.v` (linear vel), `body.w` (angular vel); `body.corners()` returns the 8 world-space corners.
 
@@ -46,11 +46,11 @@ tile.q;   // [x, y, z, w] orientation quaternion
 node test.mjs     # or: npm test
 ```
 
-Headless: verifies a tilted box settling on the floor, separated OBBs, two-box and five-box stacks, Coulomb friction, a 120-box grid, broadphase candidate-pair correctness, broadphase on/off trajectory equivalence, and **bit-identical multi-body results across two runs**.
+Headless: verifies a tilted box settling on the floor, separated OBBs, two-box and five-box stacks, Coulomb friction, a 120-box grid, broadphase candidate-pair correctness, broadphase on/off trajectory equivalence, **M3b sleeping** (settle→sleep, wake-on-contact, full-stack sleep, sleep-disabled, and slept determinism), and **bit-identical multi-body results across two runs**.
 
 ## Status
 
-**M3a done** — M1's box inertia and box↔ground-plane contacts, M2's box↔box OBB SAT over 15 axes, clipped contact manifolds, XPBD stacking and Coulomb friction, plus M3a's **uniform-grid broadphase** (each body hashed into the cell of its centre; candidate pairs from the 3×3×3 neighbourhood, sorted to match brute-force order so trajectories stay bit-identical). See [`DESIGN.md`](./DESIGN.md) for the remaining M3b (sleeping) and M4 (mahjong host wiring) plan.
+**M3 done** — M1's box inertia and box↔ground-plane contacts, M2's box↔box OBB SAT over 15 axes, clipped contact manifolds, XPBD stacking and Coulomb friction, M3a's **uniform-grid broadphase** (each body hashed into the cell of its centre; candidate pairs from the 3×3×3 neighbourhood, sorted to match brute-force order so trajectories stay bit-identical), and M3b's **sleeping** (bodies still for `sleepTime` seconds stop integrating; a moving neighbour wakes a sleeper; near-rest neighbours don't, so a settled stack sleeps together). See [`DESIGN.md`](./DESIGN.md) for the remaining M4 (mahjong host wiring) plan.
 
 ## MCP
 
