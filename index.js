@@ -213,6 +213,10 @@ export class Body {
     this.invIl = this.fixed ? [0, 0, 0]
       : [12 / (m * (sq(hy) + sq(hz))), 12 / (m * (sq(hx) + sq(hz))), 12 / (m * (sq(hx) + sq(hy)))];
     this.pp = this.p.slice(); this.pq = this.q.slice();
+    // M3b sleeping: a body still below the velocity threshold for sleepTime
+    // seconds stops integrating; a moving neighbour wakes it. Deterministic
+    // (no Math.random, thresholded timer).
+    this.sleeping = false; this.sleepTimer = 0;
   }
   // world inverse-inertia applied to a world vector L:  R · (invIl ⊙ (R⁻¹·L))
   applyInvI(L) {
@@ -239,6 +243,10 @@ export class World {
     this.contactIterations = o.contactIterations != null ? o.contactIterations : 8;
     this.broadphase = o.broadphase != null ? o.broadphase : true; // M3 uniform grid
     this.cellSize = o.cellSize != null ? o.cellSize : 2;          // grid cell edge
+    this.sleep = o.sleep != null ? o.sleep : true;                // M3b sleeping
+    this.sleepVel = o.sleepVel != null ? o.sleepVel : 0.05;       // |v| below → resting
+    this.sleepAng = o.sleepAng != null ? o.sleepAng : 0.20;       // |w| below → resting
+    this.sleepTime = o.sleepTime != null ? o.sleepTime : 1.0;    // seconds still → sleep
     this.bodies = [];
   }
   add(b) { this.bodies.push(b); return b; }
@@ -249,6 +257,7 @@ export class World {
       const contacts = new Map();
       for (const b of this.bodies) {
         if (b.fixed) continue;
+        if (b.sleeping) continue;                    // M3b: sleeping skip predict
         b.v = v.add(b.v, v.scale(this.gravity, h));
         b.pp = b.p.slice(); b.p = v.add(b.p, v.scale(b.v, h));
         b.pq = b.q.slice();
@@ -263,12 +272,41 @@ export class World {
       }
       for (const b of this.bodies) {
         if (b.fixed) continue;
+        if (b.sleeping) continue;                    // M3b: sleeping skip recovery
         b.v = v.scale(v.scale(v.sub(b.p, b.pp), 1 / h), this.linDamp);
         let dq = q.mul(b.q, q.conj(b.pq));
         if (dq[3] < 0) dq = [-dq[0], -dq[1], -dq[2], -dq[3]];
         b.w = v.scale([2 / h * dq[0], 2 / h * dq[1], 2 / h * dq[2]], this.angDamp);
       }
       this._frictionContacts(contacts, h);
+    }
+    if (this.sleep) this._updateSleep(dt);
+  }
+
+  // M3b: a body still below the velocity thresholds for sleepTime seconds goes
+  // to sleep (stops integrating); a sleeping body sharing a candidate pair with
+  // a *moving* (above threshold) neighbour wakes up. Near-rest bodies do not
+  // wake neighbours, so a fully settled stack can sleep together instead of
+  // churning. Deterministic: fixed iteration order, thresholded, no RNG.
+  _updateSleep(dt) {
+    const woken = new Set();
+    for (const [i, j] of this._candidatePairs()) {
+      const a = this.bodies[i], b = this.bodies[j];
+      if (a.sleeping && !b.fixed && !b.sleeping && (Math.hypot(...b.v) > this.sleepVel || Math.hypot(...b.w) > this.sleepAng)) woken.add(i);
+      if (b.sleeping && !a.fixed && !a.sleeping && (Math.hypot(...a.v) > this.sleepVel || Math.hypot(...a.w) > this.sleepAng)) woken.add(j);
+    }
+    for (const idx of woken) { this.bodies[idx].sleeping = false; this.bodies[idx].sleepTimer = 0; }
+    for (const b of this.bodies) {
+      if (b.fixed || b.sleeping) continue;
+      const speed = Math.hypot(...b.v), spin = Math.hypot(...b.w);
+      if (speed < this.sleepVel && spin < this.sleepAng) {
+        b.sleepTimer += dt;
+        if (b.sleepTimer >= this.sleepTime) {
+          b.sleeping = true; b.v = [0, 0, 0]; b.w = [0, 0, 0];
+        }
+      } else {
+        b.sleepTimer = 0;
+      }
     }
   }
 
@@ -279,7 +317,7 @@ export class World {
     const n = [0, 1, 0];
     for (let bi = 0; bi < this.bodies.length; bi++) {
       const b = this.bodies[bi]; let normalLambda = 0; const points = [];
-      if (b.fixed) continue;
+      if (b.fixed || b.sleeping) continue;          // M3b: sleeping treated as inert
       for (const c of b.corners()) {
         const C = this.floor - c[1];                 // penetration depth (>0 below)
         if (C <= 0) continue;
@@ -350,21 +388,24 @@ export class World {
     for (const [i, j] of this._candidatePairs()) {
       const a = this.bodies[i]; const b = this.bodies[j];
       if (a.fixed && b.fixed) continue;
+      if (a.sleeping && b.sleeping) continue;       // M3b: both asleep → no contact
+      const aInert = a.fixed || a.sleeping, bInert = b.fixed || b.sleeping;
+      if (aInert && bInert) continue;               // both inert → nothing to solve
       const hit = boxContact(a, b);
       if (!hit) continue;
       let normalLambda = 0;
       for (const p of hit.points) {
         const ra = v.sub(p, a.p); const rb = v.sub(p, b.p); const n = hit.normal;
         const ran = v.cross(ra, n); const rbn = v.cross(rb, n);
-        const wgen = a.invM + b.invM + v.dot(ran, a.applyInvI(ran)) + v.dot(rbn, b.applyInvI(rbn));
+        const wgen = (aInert ? 0 : a.invM) + (bInert ? 0 : b.invM) + (aInert ? 0 : v.dot(ran, a.applyInvI(ran))) + (bInert ? 0 : v.dot(rbn, b.applyInvI(rbn)));
         if (wgen <= 0) continue;
         const dl = hit.depth / (wgen * hit.points.length);
         normalLambda += dl;
-        if (!a.fixed) {
+        if (!aInert) {
           a.p = v.add(a.p, v.scale(n, -a.invM * dl));
           a.applyDRot(a.applyInvI(v.cross(ra, v.scale(n, -dl))));
         }
-        if (!b.fixed) {
+        if (!bInert) {
           b.p = v.add(b.p, v.scale(n, b.invM * dl));
           b.applyDRot(b.applyInvI(v.cross(rb, v.scale(n, dl))));
         }
@@ -391,11 +432,11 @@ export class World {
         const wgen = (a ? a.invM + v.dot(rat, a.applyInvI(rat)) : 0) + b.invM + v.dot(rbt, b.applyInvI(rbt));
         if (wgen <= 0) continue;
         const jt = Math.min(speed / wgen, maxImpulse); const impulse = v.scale(t, -jt);
-        if (a && !a.fixed) {
+        if (a && !a.fixed && !a.sleeping) {
           a.v = v.add(a.v, v.scale(impulse, -a.invM));
           a.w = v.add(a.w, a.applyInvI(v.cross(ra, v.scale(impulse, -1))));
         }
-        if (!b.fixed) {
+        if (!b.fixed && !b.sleeping) {
           b.v = v.add(b.v, v.scale(impulse, b.invM));
           b.w = v.add(b.w, b.applyInvI(v.cross(rb, impulse)));
         }
