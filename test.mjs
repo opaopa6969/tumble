@@ -252,4 +252,25 @@ console.log(`tumble M2: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 }
 
 console.log(`tumble M3: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
+
+// input guard: step(dt<=0) or step(_, substeps<=0) must throw a RangeError and
+// leave body state untouched (no NaN contamination).
+{
+  const w = new World({ floor: 0 });
+  const b = w.add(new Body({ pos: [0, 2, 0], half: [0.5, 0.5, 0.5] }));
+  const before = JSON.stringify([b.p, b.q, b.v, b.w]);
+  let threwDt0 = false, threwDtNeg = false, threwSub = false;
+  try { w.step(0, 8); } catch (e) { threwDt0 = e instanceof RangeError; }
+  try { w.step(-1 / 60, 8); } catch (e) { threwDtNeg = e instanceof RangeError; }
+  try { w.step(1 / 60, 0); } catch (e) { threwSub = e instanceof RangeError; }
+  ok(threwDt0, 'step(0, 8) throws RangeError');
+  ok(threwDtNeg, 'step(-1/60, 8) throws RangeError');
+  ok(threwSub, 'step(1/60, 0) throws RangeError');
+  ok(JSON.stringify([b.p, b.q, b.v, b.w]) === before,
+    'body state untouched after rejected step calls (no NaN contamination)');
+  w.step(1 / 60, 8);
+  ok(finite(b.p) && finite(b.v) && finite(b.w), 'subsequent valid step keeps state finite');
+}
+
+console.log(`tumble input-guard: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

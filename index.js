@@ -252,6 +252,8 @@ export class World {
   add(b) { this.bodies.push(b); return b; }
 
   step(dt, substeps = 8) {
+    if (!(dt > 0)) throw new RangeError(`step(dt, substeps): dt must be > 0 (got ${dt})`);
+    if (!(substeps > 0)) throw new RangeError(`step(dt, substeps): substeps must be > 0 (got ${substeps})`);
     const h = dt / substeps;
     for (let s = 0; s < substeps; s++) {
       const contacts = new Map();
