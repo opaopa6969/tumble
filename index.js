@@ -254,6 +254,20 @@ export class World {
   step(dt, substeps = 8) {
     if (!(dt > 0)) throw new RangeError(`step(dt, substeps): dt must be > 0 (got ${dt})`);
     if (!(substeps > 0)) throw new RangeError(`step(dt, substeps): substeps must be > 0 (got ${substeps})`);
+    if (this.broadphase && this.bodies.length > 1) {
+      let maxDiam = 0;
+      for (const b of this.bodies) {
+        if (b.fixed) continue;                       // fixed bodies don't move, so
+        const d = 2 * Math.max(b.half[0], b.half[1], b.half[2]);  // their size can't cause
+        if (d > maxDiam) maxDiam = d;                // a broadphase false negative
+      }
+      if (this.cellSize < maxDiam) {
+        throw new RangeError(
+          `step(): cellSize (${this.cellSize}) is smaller than the largest mobile body diameter (${maxDiam}); ` +
+          `broadphase would miss overlaps. Increase cellSize to >= ${maxDiam} or set broadphase:false.`
+        );
+      }
+    }
     const h = dt / substeps;
     for (let s = 0; s < substeps; s++) {
       const contacts = new Map();

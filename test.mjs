@@ -273,4 +273,34 @@ console.log(`tumble M3: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 }
 
 console.log(`tumble input-guard: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
+
+// broadphase guard: cellSize < largest body diameter must throw at step() so the
+// silent false-negative (overlapping bodies passing through each other) is
+// surfaced early instead of corrupting the trajectory.
+{
+  const w = new World({ cellSize: 0.5, gravity: [0, 0, 0], floor: -100 });
+  w.add(new Body({ pos: [0, 0, 0], half: [2.0, 2.0, 2.0] }));
+  w.add(new Body({ pos: [1.1, 0, 0], half: [2.0, 2.0, 2.0] }));
+  let threw = false;
+  try { w.step(1 / 60, 8); } catch (e) { threw = e instanceof RangeError; }
+  ok(threw, 'step() throws RangeError when cellSize < max body diameter (broadphase guard)');
+
+  // raising cellSize to the max diameter lets step() proceed normally
+  const w2 = new World({ cellSize: 4.0, gravity: [0, 0, 0], floor: -100 });
+  const a = w2.add(new Body({ pos: [0, 0, 0], half: [2.0, 2.0, 2.0] }));
+  const b = w2.add(new Body({ pos: [1.1, 0, 0], half: [2.0, 2.0, 2.0] }));
+  let threw2 = false;
+  try { w2.step(1 / 60, 8); } catch (e) { threw2 = true; }
+  ok(!threw2 && finite(a.p) && finite(b.p), 'step() proceeds when cellSize >= max diameter');
+
+  // broadphase disabled bypasses the guard entirely
+  const w3 = new World({ cellSize: 0.5, broadphase: false, gravity: [0, 0, 0], floor: -100 });
+  w3.add(new Body({ pos: [0, 0, 0], half: [2.0, 2.0, 2.0] }));
+  w3.add(new Body({ pos: [1.1, 0, 0], half: [2.0, 2.0, 2.0] }));
+  let threw3 = false;
+  try { w3.step(1 / 60, 8); } catch (e) { threw3 = true; }
+  ok(!threw3, 'broadphase:false bypasses the cellSize guard (O(n^2) needs no grid)');
+}
+
+console.log(`tumble broadphase-guard: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
