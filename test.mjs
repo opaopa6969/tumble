@@ -274,6 +274,25 @@ console.log(`tumble M3: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 
 console.log(`tumble input-guard: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 
+// finite-loop guard: substeps=Infinity and contactIterations=Infinity slip past
+// the existing `> 0` checks (Infinity > 0 === true) and hang the process in an
+// unbounded `for` loop — a single step() becomes a DoS. The finite-loop guard
+// must reject them with RangeError and leave body state untouched.
+{
+  const w = new World({ floor: 0 });
+  const b = w.add(new Body({ pos: [0, 2, 0], half: [0.5, 0.5, 0.5] }));
+  const before = JSON.stringify([b.p, b.q, b.v, b.w]);
+  let threwSubInf = false, threwSubNaN = false, threwIter = false;
+  try { w.step(1 / 60, Infinity); } catch (e) { threwSubInf = e instanceof RangeError; }
+  try { w.step(1 / 60, NaN); } catch (e) { threwSubNaN = e instanceof RangeError; }
+  try { w.contactIterations = Infinity; w.step(1 / 60, 8); } catch (e) { threwIter = e instanceof RangeError; }
+  ok(threwSubInf, 'step(_, Infinity) throws RangeError (no unbounded substep loop)');
+  ok(threwSubNaN, 'step(_, NaN) throws RangeError (no unbounded substep loop)');
+  ok(threwIter, 'contactIterations=Infinity throws RangeError (no unbounded contact loop)');
+  ok(JSON.stringify([b.p, b.q, b.v, b.w]) === before,
+    'body state untouched after rejected finite-loop inputs (no NaN contamination)');
+}
+
 // broadphase guard: cellSize < largest body diameter must throw at step() so the
 // silent false-negative (overlapping bodies passing through each other) is
 // surfaced early instead of corrupting the trajectory.

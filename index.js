@@ -254,6 +254,8 @@ export class World {
   step(dt, substeps = 8) {
     if (!(dt > 0)) throw new RangeError(`step(dt, substeps): dt must be > 0 (got ${dt})`);
     if (!(substeps > 0)) throw new RangeError(`step(dt, substeps): substeps must be > 0 (got ${substeps})`);
+    if (!Number.isFinite(substeps)) throw new RangeError(`step(dt, substeps): substeps must be finite (got ${substeps})`);
+    if (!Number.isFinite(this.contactIterations)) throw new RangeError(`World.contactIterations must be finite (got ${this.contactIterations})`);
     if (this.broadphase && this.bodies.length > 1) {
       let maxDiam = 0;
       for (const b of this.bodies) {
