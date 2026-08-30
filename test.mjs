@@ -303,4 +303,111 @@ console.log(`tumble input-guard: ${pass} total passed${fail ? `, ${fail} FAILED`
 }
 
 console.log(`tumble broadphase-guard: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
+
+// API contract: World/Body defaults must match the documented README values
+// exactly. A refactor that silently changes a default breaks every caller that
+// relies on it, so pin each one.
+{
+  const w = new World();
+  ok(Array.isArray(w.gravity) && w.gravity[0] === 0 && w.gravity[1] === -9.81 && w.gravity[2] === 0,
+    'World default gravity is [0,-9.81,0]');
+  ok(w.floor === 0, 'World default floor is 0');
+  ok(w.linDamp === 0.999, 'World default linDamp is 0.999');
+  ok(w.angDamp === 0.995, 'World default angDamp is 0.995');
+  ok(w.contactIterations === 8, 'World default contactIterations is 8');
+  ok(w.broadphase === true, 'World default broadphase is true');
+  ok(w.cellSize === 2, 'World default cellSize is 2');
+  ok(w.sleep === true, 'World default sleep is true');
+  ok(w.sleepVel === 0.05, 'World default sleepVel is 0.05');
+  ok(w.sleepAng === 0.20, 'World default sleepAng is 0.20');
+  ok(w.sleepTime === 1.0, 'World default sleepTime is 1.0');
+
+  const b = new Body({ pos: [1, 2, 3] });
+  ok(Array.isArray(b.p) && b.p[0] === 1 && b.p[1] === 2 && b.p[2] === 3, 'Body stores pos');
+  ok(Array.isArray(b.q) && b.q[0] === 0 && b.q[1] === 0 && b.q[2] === 0 && b.q[3] === 1,
+    'Body default quat is identity [0,0,0,1]');
+  ok(Array.isArray(b.half) && b.half[0] === 0.5 && b.half[1] === 0.5 && b.half[2] === 0.5,
+    'Body default half is [0.5,0.5,0.5]');
+  ok(b.invM === 1, 'Body default mass=1 gives invM=1');
+  ok(b.fixed === false, 'Body default fixed is false');
+  ok(b.friction === 0.5, 'Body default friction is 0.5');
+  // box inertia diagonal for a 1kg unit cube (half 0.5): I = m/12·(d²+d²) = 1/6
+  ok(Math.abs(b.invIl[0] - 6) < 1e-9 && Math.abs(b.invIl[1] - 6) < 1e-9 && Math.abs(b.invIl[2] - 6) < 1e-9,
+    'Body unit-cube inverse inertia diagonal is 6 (1/12·2·(1+1)=1/6 → inv=6)');
+
+  const f = new Body({ pos: [0, 0, 0], fixed: true });
+  ok(f.invM === 0, 'fixed body has invM=0');
+  ok(Array.isArray(f.invIl) && f.invIl[0] === 0 && f.invIl[1] === 0 && f.invIl[2] === 0,
+    'fixed body has invIl=[0,0,0]');
+}
+
+// API contract: step(dt) uses substeps=8 by default and must produce a
+// trajectory byte-identical to an explicit step(dt, 8). Every existing test
+// passes 8 explicitly, so the default-parameter path is otherwise unexercised.
+{
+  const make = (sub) => {
+    const w = new World({ gravity: [0, -9.81, 0], floor: 0 });
+    const b = w.add(new Body({
+      pos: [0, 2.0, 0], quat: TILT.slice(), half: [0.4, 0.05, 0.3], mass: 1,
+    }));
+    for (let i = 0; i < 180; i++) w.step(1 / 60, sub);
+    return [b.p, b.q, b.v, b.w];
+  };
+  const explicit = make(8);
+  const implicit = make(undefined);
+  ok(JSON.stringify(explicit) === JSON.stringify(implicit),
+    'step(dt) default substeps (8) is byte-identical to step(dt, 8)');
+}
+
+// API contract: a fixed body is immovable — its position, orientation, linear
+// and angular velocity must be byte-identical before and after being loaded by a
+// stack, even though it participates in contact solving. Existing tests check
+// that stacks settle *on top of* a fixed floor indirectly; this pins the
+// invariant directly so a regression that nudges a fixed body is caught.
+{
+  const world = new World({ gravity: [0, -9.81, 0], floor: -100 });
+  const ground = world.add(new Body({
+    pos: [0, 0.5, 0], half: [4, 0.5, 4], fixed: true, friction: 0.8,
+  }));
+  // load it: a stack of three boxes dropped onto the fixed ground
+  for (let i = 0; i < 3; i++)
+    world.add(new Body({ pos: [0, 1.5 + i * 1.02, 0], half: [0.5, 0.5, 0.5], friction: 0.8 }));
+  const before = JSON.stringify([ground.p, ground.q, ground.v, ground.w]);
+  for (let i = 0; i < 480; i++) world.step(1 / 60, 8);   // 8s of stacking
+  const after = JSON.stringify([ground.p, ground.q, ground.v, ground.w]);
+  ok(before === after, 'fixed body stays byte-identical under a loaded stack (immovable)');
+}
+
+// API contract: with no external forces (gravity zero, damping one, no
+// contacts) the integrator must conserve linear velocity exactly and advance
+// position linearly — the free-drift invariant. The XPBD predict step does
+// p += v·h then recovers v = (p − pp)/h, so with no contact correction and
+// damping = 1 this is exact (modulo FP rounding). This is the base case every
+// other test builds on, yet none isolates it.
+{
+  const world = new World({ gravity: [0, 0, 0], floor: -100, linDamp: 1, angDamp: 1 });
+  const b = world.add(new Body({ pos: [0, 0, 0], half: [0.5, 0.5, 0.5], mass: 2 }));
+  b.v = [1, -2, 3];
+  for (let i = 0; i < 100; i++) world.step(1 / 60, 8);   // 100 frames free drift
+  ok(Math.abs(b.v[0] - 1) < 1e-9 && Math.abs(b.v[1] + 2) < 1e-9 && Math.abs(b.v[2] - 3) < 1e-9,
+    'free drift conserves linear velocity (gravity=0, damp=1, no contacts)');
+  const expected = 100 / 60;   // v·t with dt=1/60 over 100 frames
+  ok(Math.abs(b.p[0] - expected) < 1e-9 && Math.abs(b.p[1] + 2 * expected) < 1e-9 && Math.abs(b.p[2] - 3 * expected) < 1e-9,
+    'free drift advances position by v·t (linear, no drift)');
+}
+
+// API contract: the quaternion stays unit-length across a long spinning run.
+// applyDRot normalises after each nudge, but finite() only rejects NaN/Inf — a
+// slow norm drift (e.g. from a broken q.norm) would pass every existing test
+// while silently corrupting rotations. Pin |q| ≈ 1 after 10s of pure spin.
+{
+  const world = new World({ gravity: [0, 0, 0], floor: -100, linDamp: 1, angDamp: 1 });
+  const b = world.add(new Body({ pos: [0, 0, 0], half: [0.5, 0.5, 0.5], mass: 1 }));
+  b.w = [3, 0, 0];                                     // pure spin about x
+  for (let i = 0; i < 600; i++) world.step(1 / 60, 8);  // 10 seconds
+  const qn = Math.hypot(b.q[0], b.q[1], b.q[2], b.q[3]);
+  ok(Math.abs(qn - 1) < 1e-9, `quaternion stays unit-length over 10s of spin (|q|=${qn.toFixed(12)})`);
+}
+
+console.log(`tumble api-contract: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
