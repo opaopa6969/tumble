@@ -206,6 +206,8 @@ export class Body {
     this.half = o.half ? o.half.slice() : [0.5, 0.5, 0.5];
     this.fixed = !!o.fixed;
     this.friction = o.friction != null ? o.friction : 0.5;
+    // Restitution is opt-in so existing stacking scenes remain unchanged.
+    this.restitution = o.restitution != null ? Math.max(0, Math.min(1, o.restitution)) : 0;
     const m = o.mass || 1;
     this.invM = this.fixed ? 0 : 1 / m;
     // box inertia diagonal (principal axes): I_x = m/12 (dy²+dz²), d = 2h
@@ -293,10 +295,12 @@ export class World {
     for (let s = 0; s < substeps; s++) {
       const contacts = new Map();
       const predicted = new Map();
+      const incoming = new Map();
       for (const b of this.bodies) {
         if (b.fixed) continue;
         if (b.sleeping) continue;                    // M3b: sleeping skip predict
         b.v = v.add(b.v, v.scale(this.gravity, h));
+        incoming.set(b, { v: b.v.slice(), w: b.w.slice() });
         b.pp = b.p.slice(); b.p = v.add(b.p, v.scale(b.v, h));
         b.pq = b.q.slice();
         const w = b.w; const dq = q.mul([w[0], w[1], w[2], 0], b.q);
@@ -342,6 +346,7 @@ export class World {
         if (wa) a.v = v.add(a.v, v.scale(n, relative * wa / total));
         if (wb) b.v = v.sub(b.v, v.scale(n, relative * wb / total));
       }
+      this._restitutionContacts(contacts, incoming, initialPenetration);
       this._frictionContacts(contacts, h);
     }
     this._hasStepped = true;
@@ -505,6 +510,45 @@ export class World {
           b.v = v.add(b.v, v.scale(impulse, b.invM));
           b.w = v.add(b.w, b.applyInvI(v.cross(rb, impulse)));
         }
+      }
+    }
+  }
+
+  // Apply a single normal impulse after XPBD position correction. Position
+  // correction is deliberately not treated as an impact: only the incoming
+  // predicted closing velocity can produce a bounce. This keeps initial
+  // placement repairs quiet while allowing explicit restitution on impacts.
+  _restitutionContacts(contacts, incoming, initialPenetration) {
+    for (const contact of contacts.values()) {
+      const { a, b, normal: n, points } = contact;
+      if (!points.length) continue;
+      // Overlaps present at the beginning of the public step are placement
+      // repairs, not impacts; never turn those repairs into a bounce.
+      if ((a && initialPenetration.has(a)) || initialPenetration.has(b)) continue;
+      const ra = a ? v.sub(points[0], a.p) : [0, 0, 0];
+      const rb = v.sub(points[0], b.p);
+      const ia = a && incoming.get(a); const ib = incoming.get(b);
+      const va = a && ia ? v.add(ia.v, v.cross(ia.w, ra)) : [0, 0, 0];
+      const vb = ib ? v.add(ib.v, v.cross(ib.w, rb)) : [0, 0, 0];
+      const closing = v.dot(v.sub(vb, va), n);
+      if (closing >= 0) continue;
+      const wa = a && !a.fixed && !a.sleeping
+        ? a.invM + v.dot(v.cross(ra, n), a.applyInvI(v.cross(ra, n))) : 0;
+      const wb = !b.fixed && !b.sleeping
+        ? b.invM + v.dot(v.cross(rb, n), b.applyInvI(v.cross(rb, n))) : 0;
+      const wgen = wa + wb;
+      if (wgen <= 0) continue;
+      const e = a ? Math.sqrt(a.restitution * b.restitution) : b.restitution;
+      if (e <= 0) continue;
+      const impulse = -(1 + e) * closing / wgen;
+      const j = v.scale(n, impulse);
+      if (a && !a.fixed && !a.sleeping) {
+        a.v = v.add(a.v, v.scale(j, -a.invM));
+        a.w = v.add(a.w, a.applyInvI(v.cross(ra, v.scale(j, -1))));
+      }
+      if (!b.fixed && !b.sleeping) {
+        b.v = v.add(b.v, v.scale(j, b.invM));
+        b.w = v.add(b.w, b.applyInvI(v.cross(rb, j)));
       }
     }
   }

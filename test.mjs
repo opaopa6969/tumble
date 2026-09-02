@@ -371,6 +371,7 @@ console.log(`tumble broadphase-guard: ${pass} total passed${fail ? `, ${fail} FA
   ok(b.invM === 1, 'Body default mass=1 gives invM=1');
   ok(b.fixed === false, 'Body default fixed is false');
   ok(b.friction === 0.5, 'Body default friction is 0.5');
+  ok(b.restitution === 0, 'Body default restitution is 0');
   // box inertia diagonal for a 1kg unit cube (half 0.5): I = m/12·(d²+d²) = 1/6
   ok(Math.abs(b.invIl[0] - 6) < 1e-9 && Math.abs(b.invIl[1] - 6) < 1e-9 && Math.abs(b.invIl[2] - 6) < 1e-9,
     'Body unit-cube inverse inertia diagonal is 6 (1/12·2·(1+1)=1/6 → inv=6)');
@@ -380,6 +381,26 @@ console.log(`tumble broadphase-guard: ${pass} total passed${fail ? `, ${fail} FA
   ok(Array.isArray(f.invIl) && f.invIl[0] === 0 && f.invIl[1] === 0 && f.invIl[2] === 0,
     'fixed body has invIl=[0,0,0]');
 }
+
+// M2 restitution: explicit bounce is applied to closing velocity, while the
+// default remains inelastic and initial overlap repair does not create a kick.
+{
+  const w = new World({ gravity: [0, -10, 0], floor: 0, sleep: false, linDamp: 1, angDamp: 1 });
+  const b = w.add(new Body({ pos: [0, 3, 0], half: [0.5, 0.5, 0.5], restitution: 1 }));
+  let peak = 0;
+  for (let i = 0; i < 90; i++) { w.step(1 / 60, 8); peak = Math.max(peak, b.v[1]); }
+  ok(peak > 3, `restitution produces an upward bounce (peak |v|=${peak.toFixed(3)})`);
+
+  const quiet = new World({ gravity: [0, 0, 0], floor: -100, sleep: false, linDamp: 1, angDamp: 1 });
+  const a = quiet.add(new Body({ pos: [0, 0, 0], restitution: 1 }));
+  const c = quiet.add(new Body({ pos: [0.9, 0, 0], restitution: 1 }));
+  for (const body of [a, c]) body.v = [0, 0, 0];
+  quiet.step(1 / 60, 8);
+  ok(Math.hypot(...a.v) < 0.01 && Math.hypot(...c.v) < 0.01,
+    'initial overlap repair does not create restitution velocity');
+}
+
+console.log(`tumble restitution: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 
 // API contract: step(dt) uses substeps=8 by default and must produce a
 // trajectory byte-identical to an explicit step(dt, 8). Every existing test
