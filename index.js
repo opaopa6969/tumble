@@ -247,6 +247,7 @@ export class World {
     this.sleepVel = o.sleepVel != null ? o.sleepVel : 0.05;       // |v| below → resting
     this.sleepAng = o.sleepAng != null ? o.sleepAng : 0.20;       // |w| below → resting
     this.sleepTime = o.sleepTime != null ? o.sleepTime : 1.0;    // seconds still → sleep
+    this._hasStepped = false;
     this.bodies = [];
   }
   add(b) { this.bodies.push(b); return b; }
@@ -271,8 +272,27 @@ export class World {
       }
     }
     const h = dt / substeps;
+    const initialPenetration = new Set();
+    // Only overlaps present when the public step begins are treated as
+    // placement repairs. Contacts created by gravity during this step retain
+    // the normal velocity-recovery behaviour.
+    for (const b of this.bodies) {
+      if (this._hasStepped) break;
+      if (b.fixed || b.sleeping || v.len(b.v) > 0.5 || v.len(b.w) > 0.5) continue;
+      if (b.corners().some((c) => this.floor - c[1] > 0)) initialPenetration.add(b);
+    }
+    for (const [i, j] of this._candidatePairs()) {
+      if (this._hasStepped) break;
+      const a = this.bodies[i]; const b = this.bodies[j];
+      if (a.fixed && b.fixed) continue;
+      const hit = boxContact(a, b);
+      if (!hit) continue;
+      if (!a.fixed && !a.sleeping && v.len(a.v) <= 0.5 && v.len(a.w) <= 0.5) initialPenetration.add(a);
+      if (!b.fixed && !b.sleeping && v.len(b.v) <= 0.5 && v.len(b.w) <= 0.5) initialPenetration.add(b);
+    }
     for (let s = 0; s < substeps; s++) {
       const contacts = new Map();
+      const predicted = new Map();
       for (const b of this.bodies) {
         if (b.fixed) continue;
         if (b.sleeping) continue;                    // M3b: sleeping skip predict
@@ -281,6 +301,7 @@ export class World {
         b.pq = b.q.slice();
         const w = b.w; const dq = q.mul([w[0], w[1], w[2], 0], b.q);
         b.q = q.norm([b.q[0] + 0.5 * h * dq[0], b.q[1] + 0.5 * h * dq[1], b.q[2] + 0.5 * h * dq[2], b.q[3] + 0.5 * h * dq[3]]);
+        predicted.set(b, { p: b.p.slice(), q: b.q.slice() });
       }
       // Iterating floor and box manifolds together propagates corrections from
       // the floor through a stack without making result order non-deterministic.
@@ -291,13 +312,39 @@ export class World {
       for (const b of this.bodies) {
         if (b.fixed) continue;
         if (b.sleeping) continue;                    // M3b: sleeping skip recovery
-        b.v = v.scale(v.scale(v.sub(b.p, b.pp), 1 / h), this.linDamp);
-        let dq = q.mul(b.q, q.conj(b.pq));
+        const prediction = predicted.get(b);
+        const recoveredP = initialPenetration.has(b) ? prediction.p : b.p;
+        const recoveredQ = initialPenetration.has(b) ? prediction.q : b.q;
+        b.v = v.scale(v.scale(v.sub(recoveredP, b.pp), 1 / h), this.linDamp);
+        let dq = q.mul(recoveredQ, q.conj(b.pq));
         if (dq[3] < 0) dq = [-dq[0], -dq[1], -dq[2], -dq[3]];
         b.w = v.scale([2 / h * dq[0], 2 / h * dq[1], 2 / h * dq[2]], this.angDamp);
       }
+      // Initial overlap repair must not leave an inward normal velocity.  A
+      // small projected velocity preserves gravity/tangential motion while
+      // preventing the corrected bodies from immediately re-penetrating.
+      for (const contact of contacts.values()) {
+        const { a, b, normal: n } = contact;
+        if (!a) {
+          if (initialPenetration.has(b) && v.dot(b.v, n) < 0) {
+            b.v = v.sub(b.v, v.scale(n, v.dot(b.v, n)));
+          }
+          continue;
+        }
+        const aMarked = initialPenetration.has(a), bMarked = initialPenetration.has(b);
+        if (!aMarked && !bMarked) continue;
+        const relative = v.dot(v.sub(b.v, a.v), n);
+        if (relative >= 0) continue;
+        const wa = aMarked && !a.fixed ? a.invM : 0;
+        const wb = bMarked && !b.fixed ? b.invM : 0;
+        const total = wa + wb;
+        if (total <= 0) continue;
+        if (wa) a.v = v.add(a.v, v.scale(n, relative * wa / total));
+        if (wb) b.v = v.sub(b.v, v.scale(n, relative * wb / total));
+      }
       this._frictionContacts(contacts, h);
     }
+    this._hasStepped = true;
     if (this.sleep) this._updateSleep(dt);
   }
 
