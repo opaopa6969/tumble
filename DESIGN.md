@@ -92,6 +92,11 @@ Substepped XPBD (position-based). Per substep `h = dt / substeps`:
 3. **Recover velocities** from the position change: `v = (p − pp)/h`,
    `w = 2·(q · pq⁻¹)_xyz / h`, each scaled by linear/angular damping.
 
+**Restitution** [M2]: after velocity recovery, an explicit `restitution` in
+`[0,1]` applies a normal impulse only to closing contact velocity. It defaults
+to `0`, so existing scenes remain inelastic. Box-pair restitution uses the
+geometric mean; ground contact uses the box value.
+
 **Coulomb friction** [M2]: after velocity recovery, a tangential contact impulse
 is clamped to `μ · Δλ_normal / h`. Box-pair friction uses the geometric mean of
 the two coefficients, so stacks don't slide apart and a tile that lands at an
@@ -155,7 +160,7 @@ new World({ gravity = [0,-9.81,0], floor = 0, linDamp = 0.999, angDamp = 0.995, 
 world.add(body) → body
 world.step(dt, substeps = 8)
 
-new Body({ pos, quat = [0,0,0,1], half = [0.5,0.5,0.5], mass = 1, fixed = false, friction = 0.5 })
+new Body({ pos, quat = [0,0,0,1], half = [0.5,0.5,0.5], mass = 1, fixed = false, friction = 0.5, restitution = 0 })
 body.p / body.q / body.v / body.w        // read state
 body.corners()                            // 8 world-space corners
 ```
