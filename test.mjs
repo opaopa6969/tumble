@@ -177,6 +177,27 @@ function gridField(n = 120, frames = 240) {
 
 console.log(`tumble M2: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 
+// Initial box overlap is a placement error, not an impact. Its positional
+// repair must not be converted into an explosive velocity by recovery.
+{
+  for (const overlap of [0.001, 0.01, 0.05, 0.1, 0.5]) {
+    const world = new World({ gravity: [0, 0, 0], floor: -100 });
+    const a = world.add(new Body({ pos: [0, 0, 0], half: [0.5, 0.5, 0.5] }));
+    const b = world.add(new Body({ pos: [1 - overlap, 0, 0], half: [0.5, 0.5, 0.5] }));
+    let peak = 0;
+    for (let i = 0; i < 30; i++) {
+      world.step(1 / 60, 8);
+      peak = Math.max(peak, Math.hypot(...b.v));
+    }
+    const separation = Math.hypot(...vsub(b.p, a.p));
+    ok(peak < 0.5, `initial overlap ${overlap} does not create explosive velocity`);
+    ok(Math.abs(separation - 1) < 0.05, `initial overlap ${overlap} resolves to unit separation`);
+    ok(finite(b.p) && finite(b.v), `deep overlap ${overlap} remains finite`);
+  }
+}
+
+function vsub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+
 // M3b sleeping: a box that settles on the floor goes to sleep after sleepTime
 // seconds of being below the velocity thresholds; its velocity is zeroed.
 {
