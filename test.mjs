@@ -790,6 +790,18 @@ console.log(`tumble ctor-guard: ${pass} total passed${fail ? `, ${fail} FAILED` 
   ok(hugeTiltFace.normal.every((component, i) => near(component, unitTilt.normal[i], 1e-12)), 'an extreme finite quaternion scale reports the same normal');
   ok(JSON.stringify(hugeTilt) === hugeTiltBefore, 'normalising an extreme finite quaternion leaves the input unchanged');
 
+  // The opposite extreme must be scale-invariant too. A directly computed
+  // subnormal length has too few significant bits to normalize this ratio.
+  const subnormalTilt = { q: [2 * Number.MIN_VALUE, Number.MIN_VALUE, 0, -Number.MIN_VALUE] };
+  const subnormalTiltBefore = JSON.stringify(subnormalTilt);
+  const ratioLength = Math.sqrt(6);
+  const unitSubnormalTilt = topFace({ q: [2 / ratioLength, 1 / ratioLength, 0, -1 / ratioLength] });
+  const subnormalTiltFace = topFace(subnormalTilt);
+  ok(subnormalTiltFace.axis === unitSubnormalTilt.axis && subnormalTiltFace.sign === unitSubnormalTilt.sign, 'a subnormal quaternion scale reports the SAME face');
+  ok(near(subnormalTiltFace.alignment, unitSubnormalTilt.alignment, 1e-12), `a subnormal quaternion scale reports the same alignment (${subnormalTiltFace.alignment} vs ${unitSubnormalTilt.alignment})`);
+  ok(subnormalTiltFace.normal.every((component, i) => near(component, unitSubnormalTilt.normal[i], 1e-12)), 'a subnormal quaternion scale reports the same normal');
+  ok(JSON.stringify(subnormalTilt) === subnormalTiltBefore, 'normalising a subnormal quaternion leaves the input unchanged');
+
   // An exact tie (two faces equally aligned) must resolve deterministically:
   // lowest axis index first, then sign +1.
   const tie = topFace(flat, [1, 1, 0]);

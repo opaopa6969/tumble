@@ -29,13 +29,12 @@ const q = {
   conj: (a) => [-a[0], -a[1], -a[2], a[3]],
   norm: (a) => {
     const l = Math.hypot(a[0], a[1], a[2], a[3]);
-    if (Number.isFinite(l)) {
-      const divisor = l || 1;
-      return [a[0] / divisor, a[1] / divisor, a[2] / divisor, a[3] / divisor];
-    }
-    // A finite quaternion can still have an unrepresentable length near
-    // Number.MAX_VALUE. Scale first so an equivalent orientation does not
-    // collapse to [0,0,0,0] when dividing by Infinity.
+    if (l === 0) return [0, 0, 0, 0];
+    // Preserve the established arithmetic for normal finite magnitudes. At
+    // either floating-point extreme, scale first so overflow cannot collapse
+    // the orientation to zero and subnormal rounding cannot distort it.
+    if (Number.isFinite(l) && l >= 2 ** -1022)
+      return [a[0] / l, a[1] / l, a[2] / l, a[3] / l];
     const scale = Math.max(Math.abs(a[0]), Math.abs(a[1]), Math.abs(a[2]), Math.abs(a[3]));
     const scaled = [a[0] / scale, a[1] / scale, a[2] / scale, a[3] / scale];
     const scaledLength = Math.hypot(scaled[0], scaled[1], scaled[2], scaled[3]);
