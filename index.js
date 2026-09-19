@@ -198,17 +198,54 @@ const boxContact = (a, b) => {
   return { normal: n, depth: best.depth, points };
 };
 
+// Input validation for the public constructors. `step()` already rejects bad
+// runtime arguments (#17 / #18 / #22), but the construction entry point let
+// broken inputs through silently: a non-finite or wrong-length vector poisons
+// p/q/v/w for good, `mass: 0` was swallowed by a `|| 1` fallback, a negative
+// mass gives invM < 0 so the body accelerates *into* the floor and falls
+// through it, and a negative friction coefficient injects energy instead of
+// removing it. Fail loudly at construction instead, in the same style.
+const assertVec = (value, len, label) => {
+  if (!Array.isArray(value) || value.length !== len || !value.every((x) => Number.isFinite(x)))
+    throw new RangeError(`${label} must be an array of ${len} finite numbers (got [${value}])`);
+};
+const assertNum = (value, label, min, exclusive = false) => {
+  if (!Number.isFinite(value) || (exclusive ? value <= min : value < min))
+    throw new RangeError(`${label} must be a finite number ${exclusive ? '>' : '>='} ${min} (got ${value})`);
+};
+
 export class Body {
   // { pos, quat?, half:[hx,hy,hz], mass, fixed? }
   constructor(o) {
+    if (o == null || o.pos == null) throw new TypeError('new Body({ pos, ... }): pos is required');
+    assertVec(o.pos, 3, 'Body.pos');
+    if (o.quat != null) {
+      assertVec(o.quat, 4, 'Body.quat');
+      if (!(Math.hypot(o.quat[0], o.quat[1], o.quat[2], o.quat[3]) > 0))
+        throw new RangeError(`Body.quat must have non-zero length (got [${o.quat}])`);
+    }
+    if (o.half != null) {
+      assertVec(o.half, 3, 'Body.half');
+      // A zero or negative half-extent is not a box: two zero extents make the
+      // inertia diagonal infinite, and a negative one flips the SAT projection.
+      for (const h of o.half) assertNum(h, 'Body.half components', 0, true);
+    }
     this.p = o.pos.slice(); this.q = (o.quat || [0, 0, 0, 1]).slice();
     this.v = [0, 0, 0]; this.w = [0, 0, 0];
     this.half = o.half ? o.half.slice() : [0.5, 0.5, 0.5];
     this.fixed = !!o.fixed;
+    if (o.friction != null) assertNum(o.friction, 'Body.friction', 0);
     this.friction = o.friction != null ? o.friction : 0.5;
     // Restitution is opt-in so existing stacking scenes remain unchanged.
+    if (o.restitution != null) assertNum(o.restitution, 'Body.restitution', -Infinity);
     this.restitution = o.restitution != null ? Math.max(0, Math.min(1, o.restitution)) : 0;
-    const m = o.mass || 1;
+    // A fixed body ignores mass entirely (invM = 0), so it is not validated
+    // there; a mobile body with mass <= 0 has no physical meaning.
+    if (!this.fixed && o.mass != null) {
+      if (o.mass === 0) throw new RangeError('Body.mass must be > 0; use `fixed: true` for an immovable body');
+      assertNum(o.mass, 'Body.mass', 0, true);
+    }
+    const m = o.mass != null ? o.mass : 1;
     this.invM = this.fixed ? 0 : 1 / m;
     // box inertia diagonal (principal axes): I_x = m/12 (dy²+dz²), d = 2h
     const [hx, hy, hz] = this.half; const sq = (x) => (2 * x) * (2 * x);
@@ -238,6 +275,19 @@ export class Body {
 
 export class World {
   constructor(o = {}) {
+    // Same reasoning as Body: a non-finite or wrong-length option here turns
+    // every body's state into NaN on the first step, with no error to point at.
+    if (o.gravity != null) assertVec(o.gravity, 3, 'World.gravity');
+    if (o.floor != null) assertNum(o.floor, 'World.floor', -Infinity);
+    if (o.linDamp != null) assertNum(o.linDamp, 'World.linDamp', 0);
+    if (o.angDamp != null) assertNum(o.angDamp, 'World.angDamp', 0);
+    // contactIterations < 1 solves no contacts at all: bodies fall through the
+    // floor silently. step() additionally re-checks it for post-hoc mutation.
+    if (o.contactIterations != null) assertNum(o.contactIterations, 'World.contactIterations', 1);
+    if (o.cellSize != null) assertNum(o.cellSize, 'World.cellSize', 0, true);
+    if (o.sleepVel != null) assertNum(o.sleepVel, 'World.sleepVel', 0);
+    if (o.sleepAng != null) assertNum(o.sleepAng, 'World.sleepAng', 0);
+    if (o.sleepTime != null) assertNum(o.sleepTime, 'World.sleepTime', 0);
     this.gravity = o.gravity || [0, -9.81, 0];
     this.floor = o.floor != null ? o.floor : 0;     // ground plane y = floor, normal +y
     this.linDamp = o.linDamp != null ? o.linDamp : 0.999;

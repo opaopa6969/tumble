@@ -556,4 +556,104 @@ console.log(`tumble restitution: ${pass} total passed${fail ? `, ${fail} FAILED`
 }
 
 console.log(`tumble api-contract: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
+
+// constructor guard: World/Body accepted broken arguments silently, so a bad
+// option produced a *wrong trajectory* instead of an error. Each case below
+// was reproduced against the unguarded engine: `mass: -1` fell through the
+// floor to y = -12.6 after 120 frames, `mass: 0` was swallowed by a `|| 1`
+// fallback, `half: [0,0,0]` gave invIl = Infinity, `friction: -5` injected
+// energy (slid 2.57 instead of 0.42), and a 2-element gravity turned every
+// position into NaN. They must throw at construction instead.
+{
+  const throws = (fn, Type, label) => {
+    let caught = null;
+    try { fn(); } catch (e) { caught = e; }
+    ok(caught instanceof Type, `${label} throws ${Type.name}` + (caught ? ` (got ${caught.constructor.name}: ${caught.message})` : ' (nothing thrown)'));
+  };
+  const accepts = (fn, label) => {
+    let caught = null;
+    try { fn(); } catch (e) { caught = e; }
+    ok(caught === null, `${label} is still accepted` + (caught ? ` (threw ${caught.message})` : ''));
+  };
+
+  // Body.pos — required, 3 finite numbers.
+  throws(() => new Body({}), TypeError, 'new Body({}) (pos missing)');
+  throws(() => new Body(), TypeError, 'new Body() (no options)');
+  throws(() => new Body({ pos: [0, 1] }), RangeError, 'Body.pos with 2 elements');
+  throws(() => new Body({ pos: [NaN, 1, 0] }), RangeError, 'Body.pos containing NaN');
+  throws(() => new Body({ pos: [0, Infinity, 0] }), RangeError, 'Body.pos containing Infinity');
+  throws(() => new Body({ pos: '0,1,0' }), RangeError, 'Body.pos that is not an array');
+
+  // Body.quat — 4 finite numbers, non-zero length.
+  throws(() => new Body({ pos: [0, 1, 0], quat: [0, 0, 1] }), RangeError, 'Body.quat with 3 elements');
+  throws(() => new Body({ pos: [0, 1, 0], quat: [0, 0, 0, NaN] }), RangeError, 'Body.quat containing NaN');
+  throws(() => new Body({ pos: [0, 1, 0], quat: [0, 0, 0, 0] }), RangeError, 'Body.quat of zero length');
+
+  // Body.half — 3 finite numbers, each > 0.
+  throws(() => new Body({ pos: [0, 1, 0], half: [0, 0, 0] }), RangeError, 'Body.half of [0,0,0] (invIl would be Infinity)');
+  throws(() => new Body({ pos: [0, 1, 0], half: [0.4, 0, 0.3] }), RangeError, 'Body.half with a zero extent');
+  throws(() => new Body({ pos: [0, 1, 0], half: [-0.5, 0.5, 0.5] }), RangeError, 'Body.half with a negative extent');
+  throws(() => new Body({ pos: [0, 1, 0], half: [0.5, 0.5] }), RangeError, 'Body.half with 2 elements');
+
+  // Body.mass — a mobile body needs a finite mass > 0; `fixed` ignores it.
+  throws(() => new Body({ pos: [0, 1, 0], mass: 0 }), RangeError, 'Body.mass of 0 (was silently coerced to 1)');
+  throws(() => new Body({ pos: [0, 1, 0], mass: -1 }), RangeError, 'Body.mass of -1 (fell through the floor)');
+  throws(() => new Body({ pos: [0, 1, 0], mass: NaN }), RangeError, 'Body.mass of NaN');
+  throws(() => new Body({ pos: [0, 1, 0], mass: Infinity }), RangeError, 'Body.mass of Infinity');
+  {
+    let message = '';
+    try { new Body({ pos: [0, 1, 0], mass: 0 }); } catch (e) { message = e.message; }
+    ok(message.includes('fixed: true'), 'Body.mass of 0 points at `fixed: true` in the message');
+  }
+  accepts(() => new Body({ pos: [0, 1, 0], mass: 0, fixed: true }), 'a fixed body with mass 0 (mass is ignored)');
+  ok(new Body({ pos: [0, 1, 0], mass: 0, fixed: true }).invM === 0, 'a fixed body with mass 0 still has invM = 0');
+
+  // Body.friction / Body.restitution.
+  throws(() => new Body({ pos: [0, 1, 0], friction: -5 }), RangeError, 'Body.friction of -5 (injected energy)');
+  throws(() => new Body({ pos: [0, 1, 0], friction: NaN }), RangeError, 'Body.friction of NaN');
+  throws(() => new Body({ pos: [0, 1, 0], restitution: NaN }), RangeError, 'Body.restitution of NaN');
+  accepts(() => new Body({ pos: [0, 1, 0], friction: 0 }), 'Body.friction of 0 (frictionless)');
+  ok(new Body({ pos: [0, 1, 0], restitution: 2 }).restitution === 1, 'Body.restitution is still clamped to [0,1] (2 → 1)');
+  ok(new Body({ pos: [0, 1, 0], restitution: -1 }).restitution === 0, 'Body.restitution is still clamped to [0,1] (-1 → 0)');
+
+  // World options.
+  throws(() => new World({ gravity: [0, -9.81] }), RangeError, 'World.gravity with 2 elements (made every position NaN)');
+  throws(() => new World({ gravity: [0, NaN, 0] }), RangeError, 'World.gravity containing NaN');
+  throws(() => new World({ floor: NaN }), RangeError, 'World.floor of NaN');
+  throws(() => new World({ linDamp: NaN }), RangeError, 'World.linDamp of NaN');
+  throws(() => new World({ linDamp: -1 }), RangeError, 'World.linDamp of -1');
+  throws(() => new World({ angDamp: Infinity }), RangeError, 'World.angDamp of Infinity');
+  throws(() => new World({ cellSize: 0 }), RangeError, 'World.cellSize of 0');
+  throws(() => new World({ cellSize: -2 }), RangeError, 'World.cellSize of -2');
+  throws(() => new World({ cellSize: NaN }), RangeError, 'World.cellSize of NaN');
+  throws(() => new World({ contactIterations: 0 }), RangeError, 'World.contactIterations of 0 (solved no contacts)');
+  throws(() => new World({ contactIterations: Infinity }), RangeError, 'World.contactIterations of Infinity');
+  throws(() => new World({ sleepVel: -1 }), RangeError, 'World.sleepVel of -1');
+  throws(() => new World({ sleepAng: NaN }), RangeError, 'World.sleepAng of NaN');
+  throws(() => new World({ sleepTime: NaN }), RangeError, 'World.sleepTime of NaN');
+
+  // Every option the README documents, at a legal value, must still construct.
+  accepts(() => new World(), 'new World() with no options');
+  accepts(() => new World({
+    gravity: [0, -9.81, 0], floor: -100, linDamp: 1, angDamp: 1, contactIterations: 1,
+    broadphase: false, cellSize: 0.5, sleep: false, sleepVel: 0, sleepAng: 0, sleepTime: 0,
+  }), 'a World with every documented option set');
+
+  // The guards must not change the physics: a scene built from valid inputs
+  // runs exactly as before (bit-identical across two runs, still settling).
+  const run = () => {
+    const world = new World({ gravity: [0, -9.81, 0], floor: 0 });
+    const platform = world.add(new Body({ pos: [0, -0.5, 0], half: [4, 0.5, 4], fixed: true, mass: 0 }));
+    const tile = world.add(new Body({ pos: [0, 2, 0], quat: TILT, half: [0.4, 0.05, 0.3] }));
+    const die = world.add(new Body({ pos: [0.9, 3, 0.2], half: [0.25, 0.25, 0.25], restitution: 0.3 }));
+    for (let i = 0; i < 240; i++) world.step(1 / 60, 8);
+    return { snapshot: JSON.stringify([platform, tile, die].map((b) => [b.p, b.q, b.v, b.w, b.sleeping])), tile, die };
+  };
+  const first = run(), second = run();
+  ok(first.snapshot === second.snapshot, 'a valid scene is still bit-identical across two runs');
+  ok(finite(first.tile.p) && finite(first.die.p), 'a valid scene keeps every position finite');
+  ok(first.tile.p[1] > 0 && first.die.p[1] > 0, 'bodies still rest on the fixed platform (no fall-through)');
+}
+
+console.log(`tumble ctor-guard: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
