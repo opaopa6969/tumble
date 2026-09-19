@@ -274,16 +274,20 @@ function vsub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
 
 console.log(`tumble M3: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 
-// input guard: step(dt<=0) or step(_, substeps<=0) must throw a RangeError and
-// leave body state untouched (no NaN contamination).
+// input guard: a non-finite/non-positive dt or non-positive substeps must throw
+// a RangeError and leave body state untouched (no NaN contamination).
 {
   const w = new World({ floor: 0 });
   const b = w.add(new Body({ pos: [0, 2, 0], half: [0.5, 0.5, 0.5] }));
   const before = JSON.stringify([b.p, b.q, b.v, b.w]);
-  let threwDt0 = false, threwDtNeg = false, threwSub = false;
+  let threwDtInf = false, threwDtNaN = false, threwDt0 = false, threwDtNeg = false, threwSub = false;
+  try { w.step(Infinity, 8); } catch (e) { threwDtInf = e instanceof RangeError; }
+  try { w.step(NaN, 8); } catch (e) { threwDtNaN = e instanceof RangeError; }
   try { w.step(0, 8); } catch (e) { threwDt0 = e instanceof RangeError; }
   try { w.step(-1 / 60, 8); } catch (e) { threwDtNeg = e instanceof RangeError; }
   try { w.step(1 / 60, 0); } catch (e) { threwSub = e instanceof RangeError; }
+  ok(threwDtInf, 'step(Infinity, 8) throws RangeError');
+  ok(threwDtNaN, 'step(NaN, 8) throws RangeError');
   ok(threwDt0, 'step(0, 8) throws RangeError');
   ok(threwDtNeg, 'step(-1/60, 8) throws RangeError');
   ok(threwSub, 'step(1/60, 0) throws RangeError');

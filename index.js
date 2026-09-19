@@ -305,6 +305,7 @@ export class World {
   add(b) { this.bodies.push(b); return b; }
 
   step(dt, substeps = 8) {
+    if (!Number.isFinite(dt)) throw new RangeError(`step(dt, substeps): dt must be finite (got ${dt})`);
     if (!(dt > 0)) throw new RangeError(`step(dt, substeps): dt must be > 0 (got ${dt})`);
     if (!(substeps > 0)) throw new RangeError(`step(dt, substeps): substeps must be > 0 (got ${substeps})`);
     if (!Number.isFinite(substeps)) throw new RangeError(`step(dt, substeps): substeps must be finite (got ${substeps})`);
