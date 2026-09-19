@@ -129,7 +129,13 @@ angle sticks instead of skating.
   O(n²) pair loop. Each body is hashed into the single cell containing its
   centre; candidate pairs come from searching that cell and its 26 neighbours
   (3×3×3 block), so two touching bodies are always found even when they straddle
-  a cell boundary (no false negatives while `cellSize ≥ body diameter`).
+  a cell boundary (mobile bodies require `cellSize ≥ body diameter`).
+- Every **fixed/mobile pair** is also included, regardless of centre distance,
+  size or orientation. A wide fixed platform therefore supports boxes at its
+  edges even when their centres are many cells apart. This conservative
+  fallback adds O(F·N) work for F fixed bodies and N total bodies; distant
+  mobile/mobile pairs are still culled by the grid. Pairs are deduplicated
+  before sorting.
 - Candidate pairs are sorted into the brute-force order (`i` ascending, then `j`
   ascending), so the trajectory is **bit-identical** whether broadphase is on or
   off for identical candidate sets — determinism is preserved exactly.

@@ -470,5 +470,40 @@ console.log(`tumble restitution: ${pass} total passed${fail ? `, ${fail} FAILED`
   ok(Math.abs(qn - 1) < 1e-9, `quaternion stays unit-length over 10s of spin (|q|=${qn.toFixed(12)})`);
 }
 
+// A fixed platform may extend far beyond its centre cell. Boxes at its edge
+// must collide exactly as in brute force, regardless of registration order
+// or platform orientation. The grid must still cull distant mobile pairs.
+{
+  for (const fixedFirst of [true, false]) for (const rotated of [false, true]) {
+    const simulate = (broadphase) => {
+      const world = new World({ broadphase, floor: -100, sleep: false });
+      const platform = new Body({
+        pos: [0, 0, 0], half: [6, 0.5, 2], fixed: true,
+        quat: rotated ? [0, Math.SQRT1_2, 0, Math.SQRT1_2] : [0, 0, 0, 1],
+      });
+      const box = new Body({ pos: rotated ? [0, 2, -5] : [5, 2, 0] });
+      for (const body of fixedFirst ? [platform, box] : [box, platform]) world.add(body);
+      world.add(new Body({ pos: [100, 2, 0] }));
+      const before = JSON.stringify(platform);
+      const pairs = world._candidatePairs();
+      const label = `fixedFirst=${fixedFirst}, rotated=${rotated}, broadphase=${broadphase}`;
+      ok(pairs.some(([i, j]) => i === 0 && j === 1), `platform edge is a candidate (${label})`);
+      ok(new Set(pairs.map(([i, j]) => `${i}:${j}`)).size === pairs.length,
+        `candidate pairs are unique (${label})`);
+      ok(pairs.every(([i, j], k) => i < j && (k === 0 ||
+        pairs[k - 1][0] < i || (pairs[k - 1][0] === i && pairs[k - 1][1] < j))),
+        `candidate pairs retain brute-force order (${label})`);
+      if (broadphase) ok(!pairs.some(([i, j]) => i === (fixedFirst ? 1 : 0) && j === 2),
+        `distant mobile pair is culled (${label})`);
+      for (let i = 0; i < 120; i++) world.step(1 / 60);
+      ok(Math.abs(box.p[1] - 1) < 0.02, `box rests on platform edge (${label})`);
+      ok(JSON.stringify(platform) === before, `fixed platform is unchanged (${label})`);
+      return world.bodies.map((b) => [b.p, b.q, b.v, b.w, b.sleeping]);
+    };
+    ok(JSON.stringify(simulate(true)) === JSON.stringify(simulate(false)),
+      `platform edge trajectory matches brute force (fixedFirst=${fixedFirst}, rotated=${rotated})`);
+  }
+}
+
 console.log(`tumble api-contract: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
