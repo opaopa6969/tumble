@@ -230,7 +230,11 @@ export class Body {
       // inertia diagonal infinite, and a negative one flips the SAT projection.
       for (const h of o.half) assertNum(h, 'Body.half components', 0, true);
     }
-    this.p = o.pos.slice(); this.q = (o.quat || [0, 0, 0, 1]).slice();
+    this.p = o.pos.slice();
+    // q.rot assumes a unit quaternion. Canonicalise once at the API boundary
+    // so corners, SAT and inverse inertia all see the same orientation even
+    // when callers provide an equivalent quaternion at another magnitude.
+    this.q = q.norm(o.quat || [0, 0, 0, 1]);
     this.v = [0, 0, 0]; this.w = [0, 0, 0];
     this.half = o.half ? o.half.slice() : [0.5, 0.5, 0.5];
     this.fixed = !!o.fixed;
@@ -300,11 +304,8 @@ export const topFace = (body, up = [0, 1, 0]) => {
   const length = Math.hypot(up[0], up[1], up[2]);
   if (!(length > 0)) throw new RangeError(`topFace up must have non-zero length (got [${up}])`);
   const u = [up[0] / length, up[1] / length, up[2] / length];
-  // The constructor only requires a non-zero quaternion, so `body.q` can be
-  // non-normalised — and q.rot's formula is a rotation only for a UNIT
-  // quaternion. For |q| ≠ 1 it is not a scaled rotation but a different map
-  // (it skews the vector), so without normalising here a scaled-up copy of the
-  // very same orientation can report the WRONG face. Normalise once, up front.
+  // Body normalises at construction, but callers can mutate body.q or pass a
+  // Body-shaped object. Keep this helper robust by normalising at its boundary.
   const rq = q.norm(body.q);
   let best = null;
   for (let axis = 0; axis < 3; axis++) {

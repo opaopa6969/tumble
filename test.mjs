@@ -436,6 +436,29 @@ console.log(`tumble broadphase-guard: ${pass} total passed${fail ? `, ${fail} FA
     'fixed body has invIl=[0,0,0]');
 }
 
+// A quaternion's magnitude is not part of its orientation. Body must
+// canonicalise it before any public geometry or the first collision query:
+// q.rot assumes a unit quaternion, so a scaled copy otherwise distorts the
+// corners and can turn the same initial pose into a different floor contact.
+{
+  const h = Math.PI / 12; // 30 degrees about x (quaternion stores half-angle)
+  const unitQuat = [Math.sin(h), 0, 0, Math.cos(h)];
+  const scaledQuat = unitQuat.map((component) => component * 2);
+  const make = (quat) => new Body({
+    pos: [0, 0.35, 0], quat, half: [0.5, 0.2, 0.3],
+  });
+  const unit = make(unitQuat); const scaled = make(scaledQuat);
+  const nearArray = (a, b, epsilon = 1e-12) =>
+    a.length === b.length && a.every((value, i) => Math.abs(value - b[i]) <= epsilon);
+  ok(nearArray(scaled.q, unit.q) && Math.abs(Math.hypot(...scaled.q) - 1) <= 1e-12,
+    'Body normalises equivalent quaternion magnitudes to one stored orientation');
+  ok(scaled.corners().every((corner, i) => nearArray(corner, unit.corners()[i])),
+    'equivalent quaternion magnitudes produce identical corners before step');
+  const touchesFloor = (body) => body.corners().some((corner) => corner[1] < 0);
+  ok(touchesFloor(scaled) === touchesFloor(unit),
+    'equivalent quaternion magnitudes produce the same collision result before step');
+}
+
 // M2 restitution: explicit bounce is applied to closing velocity, while the
 // default remains inelastic and initial overlap repair does not create a kick.
 {

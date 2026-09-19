@@ -34,7 +34,7 @@ combine into stacks, rolls and settles.
 | field | meaning |
 |---|---|
 | `p` | position `[x,y,z]` (centre of mass) |
-| `q` | orientation quaternion `[x,y,z,w]` |
+| `q` | unit orientation quaternion `[x,y,z,w]` (normalized at construction and integration) |
 | `v`, `w` | linear / angular velocity |
 | `invM` | inverse mass (`0` when `fixed`) |
 | `invIl` | **inverse box inertia diagonal** in body-local principal axes |
@@ -199,7 +199,7 @@ new World({ gravity = [0,-9.81,0], floor = 0, linDamp = 0.999, angDamp = 0.995, 
 world.add(body) → body
 world.step(dt, substeps = 8) // dt must be finite and > 0
 
-new Body({ pos, quat = [0,0,0,1], half = [0.5,0.5,0.5], mass = 1, fixed = false, friction = 0.5, restitution = 0 })
+new Body({ pos, quat = [0,0,0,1], half = [0.5,0.5,0.5], mass = 1, fixed = false, friction = 0.5, restitution = 0 }) // quat is normalized
 body.p / body.q / body.v / body.w        // read state
 body.corners()                            // 8 world-space corners
 ```
@@ -212,8 +212,9 @@ was swallowed by a `|| 1` fallback, `half: [0,0,0]` makes the inertia diagonal
 infinite, `friction < 0` injects energy instead of removing it, and a
 non-finite or wrong-length vector (`gravity: [0,-9.81]`) turns every position
 into `NaN` on the first step with nothing to point at. The domains are in
-[`README.md`](./README.md#argument-validation); valid inputs are untouched, so
-trajectories stay bit-identical.
+[`README.md`](./README.md#argument-validation). Non-unit quaternion inputs are
+normalized because the rotation formulas require a unit quaternion; unit-input
+trajectories remain deterministic.
 
 ## Mahjong applications (the reason it exists)
 
