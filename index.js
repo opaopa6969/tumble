@@ -262,9 +262,9 @@ export class World {
     if (this.broadphase && this.bodies.length > 1) {
       let maxDiam = 0;
       for (const b of this.bodies) {
-        if (b.fixed) continue;                       // fixed bodies don't move, so
-        const d = 2 * Math.max(b.half[0], b.half[1], b.half[2]);  // their size can't cause
-        if (d > maxDiam) maxDiam = d;                // a broadphase false negative
+        if (b.fixed) continue; // fixed/mobile pairs bypass the grid below
+        const d = 2 * Math.max(b.half[0], b.half[1], b.half[2]);
+        if (d > maxDiam) maxDiam = d;
       }
       if (this.cellSize < maxDiam) {
         throw new RangeError(
@@ -446,6 +446,17 @@ export class World {
           if (seen.has(pk)) continue;
           seen.add(pk); pairs.push([i, j]);
         }
+      }
+    }
+    // A fixed box can span arbitrarily many cells (e.g. a wide platform).
+    // Its centre's neighbourhood is not enough: conservatively include every
+    // fixed/mobile pair, independent of size, orientation or insertion order.
+    for (let i = 0; i < this.bodies.length; i++) {
+      if (!this.bodies[i].fixed) continue;
+      for (let j = 0; j < this.bodies.length; j++) {
+        if (this.bodies[j].fixed) continue;
+        const a = Math.min(i, j), b = Math.max(i, j), pk = a + ':' + b;
+        if (!seen.has(pk)) { seen.add(pk); pairs.push([a, b]); }
       }
     }
     // Match brute-force order (i ascending, then j ascending) so identical
