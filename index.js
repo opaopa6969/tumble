@@ -304,6 +304,8 @@ export class Body {
 export const topFace = (body, up = [0, 1, 0]) => {
   if (body == null || body.q == null) throw new TypeError('topFace(body, up?): body is required (a Body, i.e. something with a `q`)');
   assertVec(body.q, 4, 'topFace body.q');
+  if (!(Math.hypot(body.q[0], body.q[1], body.q[2], body.q[3]) > 0))
+    throw new RangeError(`topFace body.q must have non-zero length (got [${body.q}])`);
   assertVec(up, 3, 'topFace up');
   const length = Math.hypot(up[0], up[1], up[2]);
   if (!(length > 0)) throw new RangeError(`topFace up must have non-zero length (got [${up}])`);

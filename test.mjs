@@ -797,6 +797,10 @@ console.log(`tumble ctor-guard: ${pass} total passed${fail ? `, ${fail} FAILED` 
   throws(() => topFace({}), TypeError, 'an object without `q`');
   throws(() => topFace({ q: [0, 0, 0] }), RangeError, 'a 3-element quaternion');
   throws(() => topFace({ q: [0, 0, NaN, 1] }), RangeError, 'a quaternion containing NaN');
+  const zeroQuat = { q: [0, 0, 0, 0] };
+  const zeroQuatBefore = JSON.stringify(zeroQuat);
+  throws(() => topFace(zeroQuat), RangeError, 'a zero-length quaternion');
+  ok(JSON.stringify(zeroQuat) === zeroQuatBefore, 'rejecting a zero-length quaternion leaves the input unchanged');
   throws(() => topFace(flat, [0, 1]), RangeError, 'a 2-element up');
   throws(() => topFace(flat, [0, NaN, 0]), RangeError, 'an up containing NaN');
   throws(() => topFace(flat, [0, 0, 0]), RangeError, 'a zero-length up');

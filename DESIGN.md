@@ -140,6 +140,11 @@ resolves to the lowest axis index and then `sign: +1`.
 Mapping a face to a die pip or a tile face is deliberately left to the host:
 the engine has no convention for which local axis carries the `1`.
 
+`topFace` accepts a `Body` or a Body-shaped object, so it validates `body.q` at
+the call boundary: the quaternion must have four finite components and non-zero
+length. This prevents a mutated or synthetic zero quaternion from being
+silently interpreted as an identity orientation.
+
 ### Narrowphase detail
 
 - **box↔ground-plane** (M1): iterate the 8 corners; any with `y < floor` is one
