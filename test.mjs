@@ -2,7 +2,7 @@
 // browser), is deterministic, and that a tilted box dropped onto the ground
 // plane tumbles and SETTLES on a face (the mahjong-tile behaviour).
 //   node test.mjs    (or: npm test)
-import { World, Body } from './index.js';
+import { World, Body, topFace } from './index.js';
 
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('  ✗ ' + msg); } };
@@ -660,4 +660,97 @@ console.log(`tumble api-contract: ${pass} total passed${fail ? `, ${fail} FAILED
 }
 
 console.log(`tumble ctor-guard: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
+// top face readout (M4 host wiring): the host has to be able to ask "which
+// face is up?" after a die settles. Before topFace() the only way was to
+// re-implement the quaternion rotation of the 6 face normals in every caller.
+// The checks below pin the contract: the upmost face, a flatness measure, a
+// deterministic tie-break, and no mutation of the simulation.
+{
+  const throws = (fn, Type, label) => {
+    let caught = null;
+    try { fn(); } catch (e) { caught = e; }
+    ok(caught instanceof Type, `topFace: ${label} throws ${Type.name}` + (caught ? ` (got ${caught.constructor.name}: ${caught.message})` : ' (nothing thrown)'));
+  };
+  const near = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
+
+  // A body at rest with no rotation: +y local face is up, exactly flat.
+  const flat = new Body({ pos: [0, 1, 0], half: [0.25, 0.25, 0.25] });
+  const up0 = topFace(flat);
+  ok(up0.axis === 1 && up0.sign === 1, 'identity orientation reports the local +y face');
+  ok(near(up0.alignment, 1), `identity orientation is exactly flat (alignment ${up0.alignment})`);
+  ok(near(up0.normal[1], 1) && near(up0.normal[0], 0) && near(up0.normal[2], 0), 'identity orientation returns the world +y normal');
+
+  // Flipped over (180° about x): the local -y face is now up.
+  const flipped = new Body({ pos: [0, 1, 0], quat: [1, 0, 0, 0] });
+  const up1 = topFace(flipped);
+  ok(up1.axis === 1 && up1.sign === -1, 'a body flipped 180° about x reports the local -y face');
+  ok(near(up1.alignment, 1), 'a flipped body is still exactly flat');
+
+  // 90° about z maps the local +x axis onto world +y.
+  const s = Math.SQRT1_2;
+  const rolled = new Body({ pos: [0, 1, 0], quat: [0, 0, s, s] });
+  const up2 = topFace(rolled);
+  ok(up2.axis === 0 && up2.sign === 1, 'a body rolled 90° about z reports the local +x face');
+  ok(near(up2.alignment, 1, 1e-12), 'a body rolled 90° about z is still flat');
+
+  // A custom `up` — gravity need not point down -y for the caller.
+  ok(topFace(flat, [0, -1, 0]).sign === -1, 'up = [0,-1,0] reports the opposite face');
+  const sideways = topFace(flat, [1, 0, 0]);
+  ok(sideways.axis === 0 && sideways.sign === 1, 'up = [1,0,0] reports the local +x face');
+  ok(near(topFace(flat, [0, 5, 0]).alignment, 1), 'a non-normalised up still yields alignment 1');
+
+  // A non-normalised quaternion is legal at construction (only non-zero is
+  // required), and must not push alignment outside [-1, 1].
+  const scaled = new Body({ pos: [0, 1, 0], quat: [0, 0, 0, 3] });
+  const up3 = topFace(scaled);
+  ok(up3.axis === 1 && up3.sign === 1, 'a non-normalised quaternion still reports the local +y face');
+  ok(up3.alignment <= 1 && near(up3.alignment, 1), `a non-normalised quaternion keeps alignment in [-1,1] (${up3.alignment})`);
+
+  // An exact tie (two faces equally aligned) must resolve deterministically:
+  // lowest axis index first, then sign +1.
+  const tie = topFace(flat, [1, 1, 0]);
+  ok(tie.axis === 0 && tie.sign === 1, 'an exact tie resolves to the lowest axis index, then +1');
+  ok(near(tie.alignment, Math.SQRT1_2), 'the tie-broken face still reports its true alignment');
+  const tieTwice = topFace(flat, [1, 1, 0]);
+  ok(tieTwice.axis === tie.axis && tieTwice.sign === tie.sign, 'the tie-break is stable across calls');
+
+  // Reading the top face must not touch the simulation.
+  const before = JSON.stringify([flat.p, flat.q, flat.v, flat.w]);
+  topFace(flat); topFace(flat, [0, 0, 1]);
+  ok(JSON.stringify([flat.p, flat.q, flat.v, flat.w]) === before, 'topFace leaves the body state bit-identical');
+
+  // Bad input fails loudly, in the same style as the constructors.
+  throws(() => topFace(), TypeError, 'no body');
+  throws(() => topFace({}), TypeError, 'an object without `q`');
+  throws(() => topFace({ q: [0, 0, 0] }), RangeError, 'a 3-element quaternion');
+  throws(() => topFace({ q: [0, 0, NaN, 1] }), RangeError, 'a quaternion containing NaN');
+  throws(() => topFace(flat, [0, 1]), RangeError, 'a 2-element up');
+  throws(() => topFace(flat, [0, NaN, 0]), RangeError, 'an up containing NaN');
+  throws(() => topFace(flat, [0, 0, 0]), RangeError, 'a zero-length up');
+
+  // The real use: roll a die, let it settle, read the face. A cube dropped
+  // tilted onto the floor must end up flat on ONE face, and the reported face
+  // must be the highest of the six.
+  const world = new World({ gravity: [0, -9.81, 0], floor: 0 });
+  const die = world.add(new Body({ pos: [0, 2, 0], quat: TILT, half: [0.25, 0.25, 0.25] }));
+  for (let i = 0; i < 300; i++) world.step(1 / 60, 8);
+  const settled = topFace(die);
+  ok(settled.alignment > 0.99, `a settled die lies flat on a face (alignment ${settled.alignment.toFixed(4)})`);
+  ok(settled.normal[1] > 0.99, 'a settled die reports a face normal pointing up');
+  // Independent check: of the six face centres, the reported one is highest.
+  let highest = -Infinity, highestAxis = -1, highestSign = 0;
+  for (let axis = 0; axis < 3; axis++) for (const sign of [1, -1]) {
+    const local = [0, 0, 0]; local[axis] = sign * die.half[axis];
+    const [lx, ly, lz] = local, [qx, qy, qz, qw] = die.q;
+    // rotate local by q (expanded here so the check does not reuse index.js)
+    const tx = 2 * (qy * lz - qz * ly), ty = 2 * (qz * lx - qx * lz), tz = 2 * (qx * ly - qy * lx);
+    const wy = die.p[1] + ly + qw * ty + (qz * tx - qx * tz);
+    if (wy > highest) { highest = wy; highestAxis = axis; highestSign = sign; }
+  }
+  ok(settled.axis === highestAxis && settled.sign === highestSign, 'the reported face is the highest of the six face centres');
+  ok(die.sleeping === true, 'the die has actually come to rest before the face is read');
+}
+
+console.log(`tumble top-face: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
+
 process.exit(fail ? 1 : 0);

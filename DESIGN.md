@@ -116,6 +116,30 @@ angle sticks instead of skating.
 | **M3b** | **sleeping** — settled islands stop simulating (a wall of ~136 tiles can't all run forever); wake on contact. | **DONE** |
 | **M4** | **host wiring**: physics-shuffled wall, dice roll → read the top face, discard toss onto the river. Determinism keeps seeded deals reproducible | planned |
 
+The *read the top face* half of M4 is already available as the pure helper
+`topFace(body, up = [0,1,0])` (see below); the rest of M4 — shuffling the wall
+with physics, tossing a discard onto the river — is still planned.
+
+### Reading the top face
+
+```
+topFace(body, up = [0,1,0]) → { axis, sign, normal, alignment }
+```
+
+A box's face normals **are** its local axes, so the upmost face is found by
+rotating the six local axes `±x, ±y, ±z` into world space with `body.q` and
+taking the largest `dot(normal, normalize(up))`. `alignment` is that dot
+product: `1` means the face lies exactly flat, `≈0.707` means the body is
+balanced on an edge — so a host can refuse to read a die that has not properly
+settled. It is a pure function of the orientation (extents never matter, and
+no simulation state is touched), which keeps it outside the solver and
+harmless to call at any time. Determinism comes from a fixed scan order
+(axis `0,1,2` × sign `+1,-1`) with a strict improvement test, so an exact tie
+resolves to the lowest axis index and then `sign: +1`.
+
+Mapping a face to a die pip or a tile face is deliberately left to the host:
+the engine has no convention for which local axis carries the `1`.
+
 ### Narrowphase detail
 
 - **box↔ground-plane** (M1): iterate the 8 corners; any with `y < floor` is one

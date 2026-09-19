@@ -31,6 +31,7 @@ tile.q;   // [x, y, z, w] orientation quaternion
 - `new World({ gravity?, floor?, linDamp?, angDamp?, contactIterations?, broadphase?, cellSize?, sleep?, sleepVel?, sleepAng?, sleepTime? })` — `gravity` default `[0,-9.81,0]`, `floor` is the ground-plane height `y = floor` (normal `+y`), default `0`; `linDamp` default `0.999`, `angDamp` default `0.995`; `contactIterations` default `8` propagates manifold corrections through stacks; `broadphase` default `true` enables the M3 uniform-grid candidate-pair generation; `cellSize` default `2` is the grid edge (keep ≥ each mobile body's bounding-**sphere** diameter, `2·|half|` — not just its longest edge, since a rotated box reaches up to its corner distance from centre — to avoid false negatives; `step()` throws `RangeError` if it's too small; fixed/mobile pairs are always included, so fixed platforms may be larger); `sleep` default `true` enables M3b sleeping (bodies still for `sleepTime` seconds stop integrating); `sleepVel` default `0.05` / `sleepAng` default `0.20` are the linear/angular rest thresholds; `sleepTime` default `1.0` is the still-time before sleep.
 - `world.add(body)` → the body. `world.step(dt, substeps = 8)` — advance one fixed frame; `dt` must be finite and `> 0` (`substeps` default `8`).
 - `new Body({ pos, quat?, half?, mass?, fixed?, friction?, restitution? })` — `pos` **required** `[x,y,z]`; `quat` default `[0,0,0,1]`; `half` = box half-extents `[hx,hy,hz]` (default `0.5³`); `mass` default `1`; `friction` is the Coulomb coefficient (default `0.5`); `restitution` is the bounciness coefficient, clamped into `[0,1]` (default `0`, i.e. inelastic); `fixed: true` makes it immovable (`invM = 0`). Read `body.p` (position), `body.q` (quat), `body.v` (linear vel), `body.w` (angular vel); `body.corners()` returns the 8 world-space corners.
+- `topFace(body, up = [0,1,0])` → `{ axis, sign, normal, alignment }` — which face of the box points along `up`. `axis` is the body-local axis (`0`/`1`/`2` = x/y/z), `sign` is `+1`/`-1` (which of that axis's two faces), `normal` is that face's outward normal in world space, and `alignment` is `dot(normal, normalize(up))` in `[-1,1]` (`1` = the face lies exactly flat). Pure: it reads only `body.q` and changes nothing.
 
 ### Argument validation
 
@@ -52,6 +53,31 @@ wrong simulation rather than an error — a `RangeError` (a missing `pos` is a
 Valid inputs are unaffected: the guards only throw, so trajectories are
 bit-identical to before.
 
+### Reading the top face (dice)
+
+A die is a box, so "which number came up" is "which face is up" — `topFace()`
+answers that from the orientation alone, and `alignment` says how confident the
+answer is (a body balanced on an edge reads ≈ `0.707`, not ≈ `1`):
+
+```js
+import { World, Body, topFace } from 'tumble';
+
+const world = new World();
+const die = world.add(new Body({ pos: [0, 2, 0], quat: tilt, half: [0.25, 0.25, 0.25] }));
+for (let i = 0; i < 300; i++) world.step(1 / 60, 8);
+
+const face = topFace(die);              // { axis: 1, sign: -1, normal: [...], alignment: 0.999… }
+if (face.alignment > 0.99) {
+  const pips = { '0+': 1, '0-': 6, '1+': 2, '1-': 5, '2+': 3, '2-': 4 };   // your own convention
+  console.log(pips[`${face.axis}${face.sign > 0 ? '+' : '-'}`]);
+}
+```
+
+Mapping a face to a pip count (or a tile suit) is the host's business — the
+engine has no opinion about which local axis is the `1`. An exact tie between
+two faces resolves to the lowest `axis`, then `sign: +1`, so the result stays
+deterministic.
+
 ## Use via CDN (no build step)
 
 ```html
@@ -66,11 +92,11 @@ bit-identical to before.
 node test.mjs     # or: npm test
 ```
 
-Headless: verifies a tilted box settling on the floor, separated OBBs, two-box and five-box stacks, Coulomb friction, a 120-box grid, broadphase candidate-pair correctness, broadphase on/off trajectory equivalence, **M3b sleeping** (settle→sleep, wake-on-contact, full-stack sleep, sleep-disabled, and slept determinism), **bit-identical multi-body results across two runs**, and the **constructor argument guards** (bad `mass` / `half` / `quat` / `gravity` / `cellSize` … throw instead of silently simulating wrong).
+Headless: verifies a tilted box settling on the floor, separated OBBs, two-box and five-box stacks, Coulomb friction, a 120-box grid, broadphase candidate-pair correctness, broadphase on/off trajectory equivalence, **M3b sleeping** (settle→sleep, wake-on-contact, full-stack sleep, sleep-disabled, and slept determinism), **bit-identical multi-body results across two runs**, the **constructor argument guards** (bad `mass` / `half` / `quat` / `gravity` / `cellSize` … throw instead of silently simulating wrong), and the **top-face readout** (settled die flat on one face, deterministic tie-break, no mutation).
 
 ## Status
 
-**M3 done** — M1's box inertia and box↔ground-plane contacts, M2's box↔box OBB SAT over 15 axes, clipped contact manifolds, XPBD stacking and Coulomb friction, M3a's **uniform-grid broadphase** (each body hashed into the cell of its centre; candidate pairs from the 3×3×3 neighbourhood, sorted to match brute-force order so trajectories stay bit-identical), and M3b's **sleeping** (bodies still for `sleepTime` seconds stop integrating; a moving neighbour wakes a sleeper; near-rest neighbours don't, so a settled stack sleeps together). See [`DESIGN.md`](./DESIGN.md) for the remaining M4 (mahjong host wiring) plan.
+**M3 done** — M1's box inertia and box↔ground-plane contacts, M2's box↔box OBB SAT over 15 axes, clipped contact manifolds, XPBD stacking and Coulomb friction, M3a's **uniform-grid broadphase** (each body hashed into the cell of its centre; candidate pairs from the 3×3×3 neighbourhood, sorted to match brute-force order so trajectories stay bit-identical), and M3b's **sleeping** (bodies still for `sleepTime` seconds stop integrating; a moving neighbour wakes a sleeper; near-rest neighbours don't, so a settled stack sleeps together). `topFace()` is the first piece of M4 (the dice readout), but M4 itself — physics-shuffled wall, discard toss — is still **planned**. See [`DESIGN.md`](./DESIGN.md) for that plan.
 
 ## MCP
 

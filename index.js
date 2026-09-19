@@ -273,6 +273,48 @@ export class Body {
   }
 }
 
+// M4 (host wiring) building block: after a die or a tile has come to rest the
+// host needs to know WHICH face ended up on top — "dice roll → read the top
+// face". That is pure geometry over the orientation, so it lives outside the
+// solver: the 6 body-local face normals are rotated into world space and the
+// one most aligned with `up` wins. Nothing in the simulation is read or
+// written, so it is safe to call at any time (mid-flight it simply reports the
+// currently upmost face).
+//
+//   topFace(body) → { axis, sign, normal, alignment }
+//     axis      0 | 1 | 2   the body-local axis (x / y / z) whose face is up
+//     sign      +1 | -1     which of that axis's two faces
+//     normal    that face's outward normal in WORLD space (unit length)
+//     alignment dot(normal, normalize(up)) in [-1, 1]; 1 = the face lies flat,
+//               so a host can gate on e.g. `alignment > 0.99` before reading a
+//               die instead of trusting a body balanced on an edge.
+//
+// Deterministic: fixed iteration order (axis 0,1,2 × sign +1,-1) with a strict
+// improvement test, so an exact tie (a body balanced on an edge or corner)
+// resolves to the lowest axis index and then to `sign: +1`. The box's extents
+// never matter — a box's face normals are its local axes whatever its shape.
+export const topFace = (body, up = [0, 1, 0]) => {
+  if (body == null || body.q == null) throw new TypeError('topFace(body, up?): body is required (a Body, i.e. something with a `q`)');
+  assertVec(body.q, 4, 'topFace body.q');
+  assertVec(up, 3, 'topFace up');
+  const length = Math.hypot(up[0], up[1], up[2]);
+  if (!(length > 0)) throw new RangeError(`topFace up must have non-zero length (got [${up}])`);
+  const u = [up[0] / length, up[1] / length, up[2] / length];
+  let best = null;
+  for (let axis = 0; axis < 3; axis++) {
+    for (const sign of [1, -1]) {
+      const local = [0, 0, 0]; local[axis] = sign;
+      // v.norm keeps `alignment` inside [-1, 1] even when the caller built the
+      // body with a non-normalised quaternion (the constructor only requires a
+      // non-zero one, and q.rot then scales by |q|²).
+      const normal = v.norm(q.rot(body.q, local));
+      const alignment = v.dot(normal, u);
+      if (!best || alignment > best.alignment) best = { axis, sign, normal, alignment };
+    }
+  }
+  return best;
+};
+
 export class World {
   constructor(o = {}) {
     // Same reasoning as Body: a non-finite or wrong-length option here turns
