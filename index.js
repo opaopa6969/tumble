@@ -300,14 +300,18 @@ export const topFace = (body, up = [0, 1, 0]) => {
   const length = Math.hypot(up[0], up[1], up[2]);
   if (!(length > 0)) throw new RangeError(`topFace up must have non-zero length (got [${up}])`);
   const u = [up[0] / length, up[1] / length, up[2] / length];
+  // The constructor only requires a non-zero quaternion, so `body.q` can be
+  // non-normalised — and q.rot's formula is a rotation only for a UNIT
+  // quaternion. For |q| ≠ 1 it is not a scaled rotation but a different map
+  // (it skews the vector), so without normalising here a scaled-up copy of the
+  // very same orientation can report the WRONG face. Normalise once, up front.
+  const rq = q.norm(body.q);
   let best = null;
   for (let axis = 0; axis < 3; axis++) {
     for (const sign of [1, -1]) {
       const local = [0, 0, 0]; local[axis] = sign;
-      // v.norm keeps `alignment` inside [-1, 1] even when the caller built the
-      // body with a non-normalised quaternion (the constructor only requires a
-      // non-zero one, and q.rot then scales by |q|²).
-      const normal = v.norm(q.rot(body.q, local));
+      // v.norm then only cleans up float drift, keeping `alignment` in [-1, 1].
+      const normal = v.norm(q.rot(rq, local));
       const alignment = v.dot(normal, u);
       if (!best || alignment > best.alignment) best = { axis, sign, normal, alignment };
     }

@@ -706,6 +706,23 @@ console.log(`tumble ctor-guard: ${pass} total passed${fail ? `, ${fail} FAILED` 
   ok(up3.axis === 1 && up3.sign === 1, 'a non-normalised quaternion still reports the local +y face');
   ok(up3.alignment <= 1 && near(up3.alignment, 1), `a non-normalised quaternion keeps alignment in [-1,1] (${up3.alignment})`);
 
+  // ...and the face itself must not change with |q|. [0,0,0,k] above is the
+  // degenerate case (a pure scalar is the identity rotation whatever k is), so
+  // pin a real tilt too: 30° about x, written once as a unit quaternion and
+  // once scaled by 2. q.rot is a rotation only for |q| = 1 — without
+  // normalising, the scaled copy reports axis 2 / sign -1 (a different die
+  // face) with a HIGHER alignment (0.9741) than the true 0.8660, which would
+  // slip past an `alignment > 0.99`-style flatness gate.
+  const h = Math.PI / 12;                       // half of 30°
+  const tilt = [Math.sin(h), 0, 0, Math.cos(h)];
+  const unitTilt = topFace(new Body({ pos: [0, 1, 0], quat: tilt }));
+  const scaledTilt = topFace(new Body({ pos: [0, 1, 0], quat: tilt.map((c) => c * 2) }));
+  ok(unitTilt.axis === 1 && unitTilt.sign === 1, 'a 30° tilt about x still reports the local +y face');
+  ok(near(unitTilt.alignment, Math.cos(Math.PI / 6), 1e-12), `a 30° tilt reports cos 30° (${unitTilt.alignment})`);
+  ok(scaledTilt.axis === unitTilt.axis && scaledTilt.sign === unitTilt.sign, 'scaling a tilted quaternion by 2 reports the SAME face');
+  ok(near(scaledTilt.alignment, unitTilt.alignment, 1e-12), `scaling a tilted quaternion by 2 reports the same alignment (${scaledTilt.alignment} vs ${unitTilt.alignment})`);
+  ok(near(scaledTilt.normal[0], unitTilt.normal[0], 1e-12) && near(scaledTilt.normal[1], unitTilt.normal[1], 1e-12) && near(scaledTilt.normal[2], unitTilt.normal[2], 1e-12), 'scaling a tilted quaternion by 2 reports the same normal');
+
   // An exact tie (two faces equally aligned) must resolve deterministically:
   // lowest axis index first, then sign +1.
   const tie = topFace(flat, [1, 1, 0]);
