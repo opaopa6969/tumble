@@ -1,8 +1,8 @@
 # tumble — design
 
-A general 3D **rigid-body physics engine**: boxes, a ground plane and spheres,
+A general 3D **rigid-body physics engine**: boxes and a ground plane,
 resolved with **XPBD contacts**. It is engine-agnostic, but it exists to drop
-into a 3D mahjong game (tiles are boxes, dice are cubes, props are boxes/spheres).
+into a 3D mahjong game (tiles are boxes, dice are cubes, props are boxes).
 
 The thing that makes it distinct from its sibling [`xpbd-body`](https://github.com/opaopa6969/xpbd-body):
 `xpbd-body` does **articulated** bodies (joints + motors); `tumble` does **rigid
@@ -68,7 +68,11 @@ quaternion ops — no matrix type needed, and it stays correct as the body spins
 
 - **box** (half-extents) — primary.
 - **ground plane** — `y = floor`, normal `+y`.
-- **sphere** — radius (cheap broadphase proxy + actual collider).
+
+Not implemented (and not on the milestone roadmap below): a sphere collider.
+The only other "sphere" concept in this codebase is a box's **bounding-sphere
+diameter** (`2·|half|`), used purely as a broadphase `cellSize` guard — it is
+not a collider shape.
 
 ## Integrator + contact solver (XPBD)
 
