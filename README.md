@@ -30,7 +30,7 @@ tile.q;   // [x, y, z, w] orientation quaternion
 
 - `new World({ gravity?, floor?, linDamp?, angDamp?, contactIterations?, broadphase?, cellSize?, sleep?, sleepVel?, sleepAng?, sleepTime? })` — `gravity` default `[0,-9.81,0]`, `floor` is the ground-plane height `y = floor` (normal `+y`), default `0`; `linDamp` default `0.999`, `angDamp` default `0.995`; `contactIterations` default `8` propagates manifold corrections through stacks; `broadphase` default `true` enables the M3 uniform-grid candidate-pair generation; `cellSize` default `2` is the grid edge (keep ≥ each mobile body's bounding-**sphere** diameter, `2·|half|` — not just its longest edge, since a rotated box reaches up to its corner distance from centre — to avoid false negatives; `step()` throws `RangeError` if it's too small; fixed/mobile pairs are always included, so fixed platforms may be larger); `sleep` default `true` enables M3b sleeping (bodies still for `sleepTime` seconds stop integrating); `sleepVel` default `0.05` / `sleepAng` default `0.20` are the linear/angular rest thresholds; `sleepTime` default `1.0` is the still-time before sleep.
 - `world.add(body)` → the body. `world.step(dt, substeps = 8)` — advance one fixed frame; `dt` must be finite and `> 0` (`substeps` default `8`).
-- `new Body({ pos, quat?, half?, mass?, fixed?, friction?, restitution? })` — `pos` **required** `[x,y,z]`; `quat` default `[0,0,0,1]`; `half` = box half-extents `[hx,hy,hz]` (default `0.5³`); `mass` default `1`; `friction` is the Coulomb coefficient (default `0.5`); `restitution` is the bounciness coefficient, clamped into `[0,1]` (default `0`, i.e. inelastic); `fixed: true` makes it immovable (`invM = 0`). Read `body.p` (position), `body.q` (quat), `body.v` (linear vel), `body.w` (angular vel); `body.corners()` returns the 8 world-space corners.
+- `new Body({ pos, quat?, half?, mass?, fixed?, friction?, restitution? })` — `pos` **required** `[x,y,z]`; `quat` default `[0,0,0,1]` and is normalized at construction; `half` = box half-extents `[hx,hy,hz]` (default `0.5³`); `mass` default `1`; `friction` is the Coulomb coefficient (default `0.5`); `restitution` is the bounciness coefficient, clamped into `[0,1]` (default `0`, i.e. inelastic); `fixed: true` makes it immovable (`invM = 0`). Read `body.p` (position), `body.q` (unit quat), `body.v` (linear vel), `body.w` (angular vel); `body.corners()` returns the 8 world-space corners.
 - `topFace(body, up = [0,1,0])` → `{ axis, sign, normal, alignment }` — which face of the box points along `up`. `axis` is the body-local axis (`0`/`1`/`2` = x/y/z), `sign` is `+1`/`-1` (which of that axis's two faces), `normal` is that face's outward normal in world space, and `alignment` is `dot(normal, normalize(up))` in `[-1,1]` (`1` = the face lies exactly flat). Pure: it reads only `body.q` and changes nothing.
 
 ### Argument validation
@@ -40,7 +40,7 @@ wrong simulation rather than an error — a `RangeError` (a missing `pos` is a
 `TypeError`), thrown at construction:
 
 - `Body`: `pos` / `quat` / `half` must be arrays of 3 / 4 / 3 **finite** numbers
-  (`quat` non-zero length, every `half` extent `> 0`); a **mobile** body's
+  (`quat` non-zero length and normalized on input, every `half` extent `> 0`); a **mobile** body's
   `mass` must be finite and `> 0` (`mass: 0` is not a static body — use
   `fixed: true`, which ignores `mass` entirely); `friction` must be finite and
   `>= 0` (a negative coefficient *injects* energy); `restitution` must be
@@ -50,8 +50,9 @@ wrong simulation rather than an error — a `RangeError` (a missing `pos` is a
   `>= 0`); `cellSize` finite and `> 0`; `contactIterations` finite and `>= 1`
   (fewer solves no contacts, so bodies sink through the floor).
 
-Valid inputs are unaffected: the guards only throw, so trajectories are
-bit-identical to before.
+Apart from canonicalizing a non-unit `quat` to its unit representation, valid
+inputs are unaffected: the guards only throw, so unit-quaternion trajectories
+remain deterministic.
 
 ### Reading the top face (dice)
 
