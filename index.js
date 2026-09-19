@@ -263,13 +263,17 @@ export class World {
       let maxDiam = 0;
       for (const b of this.bodies) {
         if (b.fixed) continue; // fixed/mobile pairs bypass the grid below
-        const d = 2 * Math.max(b.half[0], b.half[1], b.half[2]);
+        // Use the bounding-SPHERE diameter (2·|half|), not the longest edge
+        // (2·max(half)): a rotated box reaches up to its corner distance from
+        // the centre in any direction, and the 3x3x3 neighbour search only
+        // guarantees catching a pair whose *actual* reach fits one cell.
+        const d = 2 * Math.hypot(b.half[0], b.half[1], b.half[2]);
         if (d > maxDiam) maxDiam = d;
       }
       if (this.cellSize < maxDiam) {
         throw new RangeError(
-          `step(): cellSize (${this.cellSize}) is smaller than the largest mobile body diameter (${maxDiam}); ` +
-          `broadphase would miss overlaps. Increase cellSize to >= ${maxDiam} or set broadphase:false.`
+          `step(): cellSize (${this.cellSize}) is smaller than the largest mobile body's bounding diameter (${maxDiam}); ` +
+          `broadphase would miss overlaps at some orientation. Increase cellSize to >= ${maxDiam} or set broadphase:false.`
         );
       }
     }

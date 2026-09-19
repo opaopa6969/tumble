@@ -129,7 +129,12 @@ angle sticks instead of skating.
   O(n²) pair loop. Each body is hashed into the single cell containing its
   centre; candidate pairs come from searching that cell and its 26 neighbours
   (3×3×3 block), so two touching bodies are always found even when they straddle
-  a cell boundary (mobile bodies require `cellSize ≥ body diameter`).
+  a cell boundary — **provided** `cellSize` covers each mobile body's
+  bounding-**sphere** diameter (`2·|half|`, the corner-to-centre reach at any
+  orientation), not just its longest edge (`2·max(half)`); a rotated box's
+  actual reach can exceed its axis-aligned extent by up to `√3`. `step()`
+  computes this per body and throws `RangeError` before silently dropping a
+  candidate pair.
 - Every **fixed/mobile pair** is also included, regardless of centre distance,
   size or orientation. A wide fixed platform therefore supports boxes at its
   edges even when their centres are many cells apart. This conservative
