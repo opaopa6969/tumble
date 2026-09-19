@@ -197,12 +197,15 @@ the engine has no convention for which local axis carries the `1`.
 ```js
 new World({ gravity = [0,-9.81,0], floor = 0, linDamp = 0.999, angDamp = 0.995, contactIterations = 8, broadphase = true, cellSize = 2, sleep = true, sleepVel = 0.05, sleepAng = 0.20, sleepTime = 1.0 })
 world.add(body) → body
-world.step(dt, substeps = 8) // dt must be finite and > 0
+world.step(dt, substeps = 8) // dt: finite and > 0; substeps: positive integer
 
 new Body({ pos, quat = [0,0,0,1], half = [0.5,0.5,0.5], mass = 1, fixed = false, friction = 0.5, restitution = 0 }) // quat is normalized
 body.p / body.q / body.v / body.w        // read state
 body.corners()                            // 8 world-space corners
 ```
+
+`substeps` and `contactIterations` are positive integer iteration counts;
+fractional values are rejected instead of being implicitly rounded by a loop.
 
 Both constructors validate their arguments and throw a `RangeError` (a missing
 `pos` is a `TypeError`) rather than simulating something silently wrong. Every

@@ -299,6 +299,37 @@ console.log(`tumble M3: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 
 console.log(`tumble input-guard: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
 
+// Iteration counts are discrete. Previously a fractional count was silently
+// rounded up by the loop condition: substeps=0.5 ran once with h=2*dt, while
+// contactIterations=1.5 solved twice. Reject fractions instead of changing the
+// requested simulation time or solver work behind the caller's back.
+{
+  for (const substeps of [0.5, 1.5]) {
+    const w = new World({ gravity: [0, 0, 0], linDamp: 1, angDamp: 1, sleep: false });
+    const b = w.add(new Body({ pos: [0, 0, 0] }));
+    b.v = [1, 0, 0];
+    const before = JSON.stringify([b.p, b.q, b.v, b.w, b.sleeping, b.sleepTimer]);
+    let threw = false;
+    try { w.step(1, substeps); } catch (e) { threw = e instanceof RangeError; }
+    ok(threw, `step(_, ${substeps}) rejects a fractional substep count`);
+    ok(JSON.stringify([b.p, b.q, b.v, b.w, b.sleeping, b.sleepTimer]) === before,
+      `step(_, ${substeps}) leaves simulation state untouched`);
+  }
+  for (const iterations of [0.5, 1.5]) {
+    const w = new World();
+    const b = w.add(new Body({ pos: [0, 2, 0] }));
+    w.contactIterations = iterations;
+    const before = JSON.stringify([b.p, b.q, b.v, b.w, b.sleeping, b.sleepTimer]);
+    let threw = false;
+    try { w.step(1 / 60, 8); } catch (e) { threw = e instanceof RangeError; }
+    ok(threw, `mutated contactIterations=${iterations} is rejected before stepping`);
+    ok(JSON.stringify([b.p, b.q, b.v, b.w, b.sleeping, b.sleepTimer]) === before,
+      `contactIterations=${iterations} leaves simulation state untouched`);
+  }
+}
+
+console.log(`tumble integer-count-guard: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
+
 // finite-loop guard: substeps=Infinity and contactIterations=Infinity slip past
 // the existing `> 0` checks (Infinity > 0 === true) and hang the process in an
 // unbounded `for` loop — a single step() becomes a DoS. The finite-loop guard
@@ -654,6 +685,8 @@ console.log(`tumble api-contract: ${pass} total passed${fail ? `, ${fail} FAILED
   throws(() => new World({ cellSize: -2 }), RangeError, 'World.cellSize of -2');
   throws(() => new World({ cellSize: NaN }), RangeError, 'World.cellSize of NaN');
   throws(() => new World({ contactIterations: 0 }), RangeError, 'World.contactIterations of 0 (solved no contacts)');
+  throws(() => new World({ contactIterations: 0.5 }), RangeError, 'World.contactIterations of 0.5 (was silently run once)');
+  throws(() => new World({ contactIterations: 1.5 }), RangeError, 'World.contactIterations of 1.5 (was silently run twice)');
   throws(() => new World({ contactIterations: Infinity }), RangeError, 'World.contactIterations of Infinity');
   throws(() => new World({ sleepVel: -1 }), RangeError, 'World.sleepVel of -1');
   throws(() => new World({ sleepAng: NaN }), RangeError, 'World.sleepAng of NaN');
