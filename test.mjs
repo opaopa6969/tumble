@@ -314,9 +314,13 @@ console.log(`tumble input-guard: ${pass} total passed${fail ? `, ${fail} FAILED`
     'body state untouched after rejected finite-loop inputs (no NaN contamination)');
 }
 
-// broadphase guard: cellSize < largest body diameter must throw at step() so the
-// silent false-negative (overlapping bodies passing through each other) is
-// surfaced early instead of corrupting the trajectory.
+// broadphase guard: cellSize < largest body's bounding-sphere diameter must
+// throw at step() so the silent false-negative (overlapping bodies passing
+// through each other) is surfaced early instead of corrupting the trajectory.
+// The bound must be the bounding-sphere diameter (2·|half|), not the longest
+// edge (2·max(half)): a rotated box reaches up to its corner distance from
+// its centre, which for a near-cubic box is up to sqrt(3) times the longest
+// edge.
 {
   const w = new World({ cellSize: 0.5, gravity: [0, 0, 0], floor: -100 });
   w.add(new Body({ pos: [0, 0, 0], half: [2.0, 2.0, 2.0] }));
@@ -325,13 +329,24 @@ console.log(`tumble input-guard: ${pass} total passed${fail ? `, ${fail} FAILED`
   try { w.step(1 / 60, 8); } catch (e) { threw = e instanceof RangeError; }
   ok(threw, 'step() throws RangeError when cellSize < max body diameter (broadphase guard)');
 
-  // raising cellSize to the max diameter lets step() proceed normally
-  const w2 = new World({ cellSize: 4.0, gravity: [0, 0, 0], floor: -100 });
+  // cellSize equal to the longest edge (the old, insufficient bound) must
+  // still throw: a cube of half=[2,2,2] has bounding diameter 2*sqrt(12) ≈
+  // 6.928, well past its 4.0 edge length.
+  const wEdge = new World({ cellSize: 4.0, gravity: [0, 0, 0], floor: -100 });
+  wEdge.add(new Body({ pos: [0, 0, 0], half: [2.0, 2.0, 2.0] }));
+  wEdge.add(new Body({ pos: [1.1, 0, 0], half: [2.0, 2.0, 2.0] }));
+  let threwEdge = false;
+  try { wEdge.step(1 / 60, 8); } catch (e) { threwEdge = e instanceof RangeError; }
+  ok(threwEdge, 'step() still throws when cellSize == longest edge but < bounding-sphere diameter');
+
+  // raising cellSize to the true bounding-sphere diameter lets step() proceed
+  const trueDiam = 2 * Math.hypot(2.0, 2.0, 2.0);
+  const w2 = new World({ cellSize: trueDiam, gravity: [0, 0, 0], floor: -100 });
   const a = w2.add(new Body({ pos: [0, 0, 0], half: [2.0, 2.0, 2.0] }));
   const b = w2.add(new Body({ pos: [1.1, 0, 0], half: [2.0, 2.0, 2.0] }));
   let threw2 = false;
   try { w2.step(1 / 60, 8); } catch (e) { threw2 = true; }
-  ok(!threw2 && finite(a.p) && finite(b.p), 'step() proceeds when cellSize >= max diameter');
+  ok(!threw2 && finite(a.p) && finite(b.p), 'step() proceeds when cellSize >= bounding-sphere diameter');
 
   // broadphase disabled bypasses the guard entirely
   const w3 = new World({ cellSize: 0.5, broadphase: false, gravity: [0, 0, 0], floor: -100 });
@@ -340,6 +355,41 @@ console.log(`tumble input-guard: ${pass} total passed${fail ? `, ${fail} FAILED`
   let threw3 = false;
   try { w3.step(1 / 60, 8); } catch (e) { threw3 = true; }
   ok(!threw3, 'broadphase:false bypasses the cellSize guard (O(n^2) needs no grid)');
+}
+
+// rotated bodies: at a cellSize that only covers the axis-aligned edge (not
+// the bounding-sphere diameter), two mobile boxes rotated 45deg can overlap
+// while their centres straddle a 2-cell gap, which the 3x3x3 neighbour
+// search never pairs. The corrected guard must reject that cellSize outright
+// (regression for the false-negative fixed here), and a cellSize raised to
+// the true bounding diameter must match the broadphase:false trajectory
+// exactly.
+{
+  const half = [0.5, 0.5, 0.5];
+  const h = Math.PI / 8; // 45deg about z, as a quaternion
+  const rot45z = [0, 0, Math.sin(h), Math.cos(h)];
+  const makeWorld = (broadphase, cellSize) => {
+    const world = new World({ gravity: [0, 0, 0], floor: -1000, cellSize, broadphase, sleep: false });
+    const a = world.add(new Body({ pos: [0.999, 5, 0], quat: rot45z, half, mass: 1 }));
+    const b = world.add(new Body({ pos: [2.001, 5, 0], quat: rot45z, half, mass: 1 }));
+    return { world, a, b };
+  };
+
+  let threwRotated = false;
+  try { makeWorld(true, 1).world.step(1 / 60, 8); } catch (e) { threwRotated = e instanceof RangeError; }
+  ok(threwRotated, 'guard rejects cellSize sized only for the axis-aligned edge of a rotatable box');
+
+  const trueDiam = 2 * Math.hypot(...half);
+  const runs = {};
+  for (const bp of [true, false]) {
+    const { world, a, b } = makeWorld(bp, trueDiam);
+    for (let i = 0; i < 30; i++) world.step(1 / 60, 8);
+    runs[bp] = { a: a.p.slice(), b: b.p.slice(), av: a.v.slice(), bv: b.v.slice() };
+  }
+  ok(JSON.stringify(runs[true]) === JSON.stringify(runs[false]),
+    'rotated boxes: broadphase on/off trajectories match once cellSize covers the bounding-sphere diameter');
+  ok(runs[true].a[0] !== 0.999,
+    'rotated boxes actually separate (contact was resolved, not silently skipped)');
 }
 
 console.log(`tumble broadphase-guard: ${pass} total passed${fail ? `, ${fail} FAILED` : ''}`);
