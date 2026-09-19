@@ -173,7 +173,7 @@ angle sticks instead of skating.
 ```js
 new World({ gravity = [0,-9.81,0], floor = 0, linDamp = 0.999, angDamp = 0.995, contactIterations = 8, broadphase = true, cellSize = 2, sleep = true, sleepVel = 0.05, sleepAng = 0.20, sleepTime = 1.0 })
 world.add(body) → body
-world.step(dt, substeps = 8)
+world.step(dt, substeps = 8) // dt must be finite and > 0
 
 new Body({ pos, quat = [0,0,0,1], half = [0.5,0.5,0.5], mass = 1, fixed = false, friction = 0.5, restitution = 0 })
 body.p / body.q / body.v / body.w        // read state
