@@ -213,6 +213,10 @@ const assertNum = (value, label, min, exclusive = false) => {
   if (!Number.isFinite(value) || (exclusive ? value <= min : value < min))
     throw new RangeError(`${label} must be a finite number ${exclusive ? '>' : '>='} ${min} (got ${value})`);
 };
+const assertPositiveInteger = (value, label) => {
+  if (!Number.isInteger(value) || value < 1)
+    throw new RangeError(`${label} must be a positive integer (got ${value})`);
+};
 
 export class Body {
   // { pos, quat?, half:[hx,hy,hz], mass, fixed? }
@@ -330,7 +334,7 @@ export class World {
     if (o.angDamp != null) assertNum(o.angDamp, 'World.angDamp', 0);
     // contactIterations < 1 solves no contacts at all: bodies fall through the
     // floor silently. step() additionally re-checks it for post-hoc mutation.
-    if (o.contactIterations != null) assertNum(o.contactIterations, 'World.contactIterations', 1);
+    if (o.contactIterations != null) assertPositiveInteger(o.contactIterations, 'World.contactIterations');
     if (o.cellSize != null) assertNum(o.cellSize, 'World.cellSize', 0, true);
     if (o.sleepVel != null) assertNum(o.sleepVel, 'World.sleepVel', 0);
     if (o.sleepAng != null) assertNum(o.sleepAng, 'World.sleepAng', 0);
@@ -354,9 +358,9 @@ export class World {
   step(dt, substeps = 8) {
     if (!Number.isFinite(dt)) throw new RangeError(`step(dt, substeps): dt must be finite (got ${dt})`);
     if (!(dt > 0)) throw new RangeError(`step(dt, substeps): dt must be > 0 (got ${dt})`);
-    if (!(substeps > 0)) throw new RangeError(`step(dt, substeps): substeps must be > 0 (got ${substeps})`);
-    if (!Number.isFinite(substeps)) throw new RangeError(`step(dt, substeps): substeps must be finite (got ${substeps})`);
-    if (!Number.isFinite(this.contactIterations)) throw new RangeError(`World.contactIterations must be finite (got ${this.contactIterations})`);
+    assertPositiveInteger(substeps, 'step(dt, substeps): substeps');
+    // Re-check the public field in case a caller mutates it after construction.
+    assertPositiveInteger(this.contactIterations, 'World.contactIterations');
     if (this.broadphase && this.bodies.length > 1) {
       let maxDiam = 0;
       for (const b of this.bodies) {
