@@ -32,6 +32,26 @@ tile.q;   // [x, y, z, w] orientation quaternion
 - `world.add(body)` → the body. `world.step(dt, substeps = 8)` — advance one fixed frame (`substeps` default `8`).
 - `new Body({ pos, quat?, half?, mass?, fixed?, friction? })` — `pos` **required** `[x,y,z]`; `quat` default `[0,0,0,1]`; `half` = box half-extents `[hx,hy,hz]` (default `0.5³`); `mass` default `1`; `friction` is the Coulomb coefficient (default `0.5`); `fixed: true` makes it immovable (`invM = 0`). Read `body.p` (position), `body.q` (quat), `body.v` (linear vel), `body.w` (angular vel); `body.corners()` returns the 8 world-space corners.
 
+### Argument validation
+
+Both constructors reject arguments that would otherwise produce a silently
+wrong simulation rather than an error — a `RangeError` (a missing `pos` is a
+`TypeError`), thrown at construction:
+
+- `Body`: `pos` / `quat` / `half` must be arrays of 3 / 4 / 3 **finite** numbers
+  (`quat` non-zero length, every `half` extent `> 0`); a **mobile** body's
+  `mass` must be finite and `> 0` (`mass: 0` is not a static body — use
+  `fixed: true`, which ignores `mass` entirely); `friction` must be finite and
+  `>= 0` (a negative coefficient *injects* energy); `restitution` must be
+  finite (it is still clamped into `[0,1]`).
+- `World`: `gravity` must be 3 finite numbers; `floor`, `linDamp`, `angDamp`,
+  `sleepVel`, `sleepAng`, `sleepTime` finite (damping and sleep thresholds
+  `>= 0`); `cellSize` finite and `> 0`; `contactIterations` finite and `>= 1`
+  (fewer solves no contacts, so bodies sink through the floor).
+
+Valid inputs are unaffected: the guards only throw, so trajectories are
+bit-identical to before.
+
 ## Use via CDN (no build step)
 
 ```html
@@ -46,7 +66,7 @@ tile.q;   // [x, y, z, w] orientation quaternion
 node test.mjs     # or: npm test
 ```
 
-Headless: verifies a tilted box settling on the floor, separated OBBs, two-box and five-box stacks, Coulomb friction, a 120-box grid, broadphase candidate-pair correctness, broadphase on/off trajectory equivalence, **M3b sleeping** (settle→sleep, wake-on-contact, full-stack sleep, sleep-disabled, and slept determinism), and **bit-identical multi-body results across two runs**.
+Headless: verifies a tilted box settling on the floor, separated OBBs, two-box and five-box stacks, Coulomb friction, a 120-box grid, broadphase candidate-pair correctness, broadphase on/off trajectory equivalence, **M3b sleeping** (settle→sleep, wake-on-contact, full-stack sleep, sleep-disabled, and slept determinism), **bit-identical multi-body results across two runs**, and the **constructor argument guards** (bad `mass` / `half` / `quat` / `gravity` / `cellSize` … throw instead of silently simulating wrong).
 
 ## Status
 

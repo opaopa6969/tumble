@@ -176,6 +176,17 @@ body.p / body.q / body.v / body.w        // read state
 body.corners()                            // 8 world-space corners
 ```
 
+Both constructors validate their arguments and throw a `RangeError` (a missing
+`pos` is a `TypeError`) rather than simulating something silently wrong. Every
+guarded case was one that previously produced no error at all: `mass: -1` gives
+`invM < 0` and the body accelerates *into* the floor and through it, `mass: 0`
+was swallowed by a `|| 1` fallback, `half: [0,0,0]` makes the inertia diagonal
+infinite, `friction < 0` injects energy instead of removing it, and a
+non-finite or wrong-length vector (`gravity: [0,-9.81]`) turns every position
+into `NaN` on the first step with nothing to point at. The domains are in
+[`README.md`](./README.md#argument-validation); valid inputs are untouched, so
+trajectories stay bit-identical.
+
 ## Mahjong applications (the reason it exists)
 
 - **The wall.** ~136 tiles (boxes) physics-shuffled and stacked two-high — M2's
