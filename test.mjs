@@ -779,6 +779,57 @@ console.log(`tumble ctor-guard: ${pass} total passed${fail ? `, ${fail} FAILED` 
   ok(near(scaledTilt.alignment, unitTilt.alignment, 1e-12), `scaling a tilted quaternion by 2 reports the same alignment (${scaledTilt.alignment} vs ${unitTilt.alignment})`);
   ok(near(scaledTilt.normal[0], unitTilt.normal[0], 1e-12) && near(scaledTilt.normal[1], unitTilt.normal[1], 1e-12) && near(scaledTilt.normal[2], unitTilt.normal[2], 1e-12), 'scaling a tilted quaternion by 2 reports the same normal');
 
+  // Near the largest representable Number, a finite quaternion's length may
+  // round to Infinity. It still represents the same orientation: normalization
+  // must not divide by Infinity and collapse it to zero.
+  const hugeTilt = { q: tilt.map((c) => c * Number.MAX_VALUE) };
+  const hugeTiltBefore = JSON.stringify(hugeTilt);
+  const hugeTiltFace = topFace(hugeTilt);
+  ok(hugeTiltFace.axis === unitTilt.axis && hugeTiltFace.sign === unitTilt.sign, 'an extreme finite quaternion scale reports the SAME face');
+  ok(near(hugeTiltFace.alignment, unitTilt.alignment, 1e-12), `an extreme finite quaternion scale reports the same alignment (${hugeTiltFace.alignment} vs ${unitTilt.alignment})`);
+  ok(hugeTiltFace.normal.every((component, i) => near(component, unitTilt.normal[i], 1e-12)), 'an extreme finite quaternion scale reports the same normal');
+  ok(JSON.stringify(hugeTilt) === hugeTiltBefore, 'normalising an extreme finite quaternion leaves the input unchanged');
+
+  // The opposite extreme must be scale-invariant too. A directly computed
+  // subnormal length has too few significant bits to normalize this ratio.
+  const subnormalTilt = { q: [2 * Number.MIN_VALUE, Number.MIN_VALUE, 0, -Number.MIN_VALUE] };
+  const subnormalTiltBefore = JSON.stringify(subnormalTilt);
+  const ratioLength = Math.sqrt(6);
+  const unitSubnormalTilt = topFace({ q: [2 / ratioLength, 1 / ratioLength, 0, -1 / ratioLength] });
+  const subnormalTiltFace = topFace(subnormalTilt);
+  ok(subnormalTiltFace.axis === unitSubnormalTilt.axis && subnormalTiltFace.sign === unitSubnormalTilt.sign, 'a subnormal quaternion scale reports the SAME face');
+  ok(near(subnormalTiltFace.alignment, unitSubnormalTilt.alignment, 1e-12), `a subnormal quaternion scale reports the same alignment (${subnormalTiltFace.alignment} vs ${unitSubnormalTilt.alignment})`);
+  ok(subnormalTiltFace.normal.every((component, i) => near(component, unitSubnormalTilt.normal[i], 1e-12)), 'a subnormal quaternion scale reports the same normal');
+  ok(JSON.stringify(subnormalTilt) === subnormalTiltBefore, 'normalising a subnormal quaternion leaves the input unchanged');
+
+  // Normalising only exceptional magnitudes is not enough: equivalent inputs
+  // then take different floating-point paths at ordinary magnitudes. This
+  // quaternion has a mathematical three-way face tie, so tiny path-dependent
+  // differences used to change the selected axis in 88 of these 384 cases.
+  const permutations = (values) => {
+    if (values.length === 1) return [values];
+    return values.flatMap((value, i) => permutations(values.filter((_, j) => i !== j)).map((tail) => [value, ...tail]));
+  };
+  const tieScaleMismatches = [];
+  const tieScales = [1, Number.MIN_VALUE, Number.MAX_VALUE / 4];
+  for (const scale of tieScales) for (const permutation of permutations([-4, 2, 3, 1])) {
+    for (let signs = 0; signs < 16; signs++) {
+      const signed = permutation.map((component, i) => component * (signs & (1 << i) ? -1 : 1));
+      const candidate = signed.map((component) => component * scale);
+      const candidateBefore = candidate.slice();
+      const unitCandidate = signed.map((component) => component / Math.sqrt(30));
+      const actual = topFace({ q: candidate });
+      const expected = topFace({ q: unitCandidate });
+      if (actual.axis !== expected.axis || actual.sign !== expected.sign ||
+          !near(actual.alignment, expected.alignment, 1e-12) ||
+          !actual.normal.every((component, i) => near(component, expected.normal[i], 1e-12)))
+        tieScaleMismatches.push({ candidate, actual, expected });
+      if (!candidate.every((component, i) => Object.is(component, candidateBefore[i])))
+        tieScaleMismatches.push({ candidate, mutation: candidateBefore });
+    }
+  }
+  ok(tieScaleMismatches.length === 0, `all 1,152 ordinary/subnormal/extreme permuted/signed mathematical ties are scale-invariant (${tieScaleMismatches.length} mismatches)`);
+
   // An exact tie (two faces equally aligned) must resolve deterministically:
   // lowest axis index first, then sign +1.
   const tie = topFace(flat, [1, 1, 0]);
