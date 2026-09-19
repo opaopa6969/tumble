@@ -142,8 +142,10 @@ the engine has no convention for which local axis carries the `1`.
 
 `topFace` accepts a `Body` or a Body-shaped object, so it validates `body.q` at
 the call boundary: the quaternion must have four finite components and non-zero
-length. This prevents a mutated or synthetic zero quaternion from being
-silently interpreted as an identity orientation.
+length. Normalization scales finite extreme values before division when their
+mathematical length exceeds `Number.MAX_VALUE`, so scalar-equivalent
+quaternions still produce the same face. This prevents a mutated or synthetic
+zero quaternion from being silently interpreted as an identity orientation.
 
 ### Narrowphase detail
 

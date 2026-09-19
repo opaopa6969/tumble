@@ -27,7 +27,20 @@ const q = {
     a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
   ],
   conj: (a) => [-a[0], -a[1], -a[2], a[3]],
-  norm: (a) => { const l = Math.hypot(a[0], a[1], a[2], a[3]) || 1; return [a[0] / l, a[1] / l, a[2] / l, a[3] / l]; },
+  norm: (a) => {
+    const l = Math.hypot(a[0], a[1], a[2], a[3]);
+    if (Number.isFinite(l)) {
+      const divisor = l || 1;
+      return [a[0] / divisor, a[1] / divisor, a[2] / divisor, a[3] / divisor];
+    }
+    // A finite quaternion can still have an unrepresentable length near
+    // Number.MAX_VALUE. Scale first so an equivalent orientation does not
+    // collapse to [0,0,0,0] when dividing by Infinity.
+    const scale = Math.max(Math.abs(a[0]), Math.abs(a[1]), Math.abs(a[2]), Math.abs(a[3]));
+    const scaled = [a[0] / scale, a[1] / scale, a[2] / scale, a[3] / scale];
+    const scaledLength = Math.hypot(scaled[0], scaled[1], scaled[2], scaled[3]);
+    return [scaled[0] / scaledLength, scaled[1] / scaledLength, scaled[2] / scaledLength, scaled[3] / scaledLength];
+  },
   rot: (a, p) => {
     const tx = 2 * (a[1] * p[2] - a[2] * p[1]);
     const ty = 2 * (a[2] * p[0] - a[0] * p[2]);

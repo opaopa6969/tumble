@@ -779,6 +779,17 @@ console.log(`tumble ctor-guard: ${pass} total passed${fail ? `, ${fail} FAILED` 
   ok(near(scaledTilt.alignment, unitTilt.alignment, 1e-12), `scaling a tilted quaternion by 2 reports the same alignment (${scaledTilt.alignment} vs ${unitTilt.alignment})`);
   ok(near(scaledTilt.normal[0], unitTilt.normal[0], 1e-12) && near(scaledTilt.normal[1], unitTilt.normal[1], 1e-12) && near(scaledTilt.normal[2], unitTilt.normal[2], 1e-12), 'scaling a tilted quaternion by 2 reports the same normal');
 
+  // Near the largest representable Number, a finite quaternion's length may
+  // round to Infinity. It still represents the same orientation: normalization
+  // must not divide by Infinity and collapse it to zero.
+  const hugeTilt = { q: tilt.map((c) => c * Number.MAX_VALUE) };
+  const hugeTiltBefore = JSON.stringify(hugeTilt);
+  const hugeTiltFace = topFace(hugeTilt);
+  ok(hugeTiltFace.axis === unitTilt.axis && hugeTiltFace.sign === unitTilt.sign, 'an extreme finite quaternion scale reports the SAME face');
+  ok(near(hugeTiltFace.alignment, unitTilt.alignment, 1e-12), `an extreme finite quaternion scale reports the same alignment (${hugeTiltFace.alignment} vs ${unitTilt.alignment})`);
+  ok(hugeTiltFace.normal.every((component, i) => near(component, unitTilt.normal[i], 1e-12)), 'an extreme finite quaternion scale reports the same normal');
+  ok(JSON.stringify(hugeTilt) === hugeTiltBefore, 'normalising an extreme finite quaternion leaves the input unchanged');
+
   // An exact tie (two faces equally aligned) must resolve deterministically:
   // lowest axis index first, then sign +1.
   const tie = topFace(flat, [1, 1, 0]);
